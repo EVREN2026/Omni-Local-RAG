@@ -6,6 +6,13 @@ echo   Omni-Local RAG  --  PyInstaller Build
 echo ============================================================
 echo.
 
+REM ---------- Directory guard -------------------------------------
+if not exist main.py (
+    echo [ERROR] Run this script from inside the OmniLocalRAG\ folder.
+    echo         Example:  cd OmniLocalRAG  ^&^&  build.bat
+    pause & exit /b 1
+)
+
 REM ---------- Python check -----------------------------------------
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -36,6 +43,7 @@ if exist dist\OmniLocal (
     rmdir /s /q dist\OmniLocal
 )
 if exist build\OmniLocal (
+    echo [INFO] Removing previous build\OmniLocal ...
     rmdir /s /q build\OmniLocal
 )
 

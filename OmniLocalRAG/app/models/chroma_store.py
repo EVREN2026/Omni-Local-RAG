@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -24,6 +26,15 @@ class ChromaStore:
         if self._client is not None:
             return True
         try:
+            # onnxruntime's DLL fails on this system (WinError 1114).
+            # chromadb 0.5.x evaluates DefaultEmbeddingFunction() as a default
+            # parameter at class-definition time, which triggers onnxruntime's
+            # DLL load before any user code runs.  Pre-stubbing the module
+            # prevents the DLL from being loaded at all — safe because we always
+            # supply BGE-M3 vectors and never use chromadb's default embeddings.
+            if "onnxruntime" not in sys.modules:
+                sys.modules["onnxruntime"] = types.ModuleType("onnxruntime")
+
             import chromadb  # type: ignore
             from chromadb.config import Settings  # type: ignore
 

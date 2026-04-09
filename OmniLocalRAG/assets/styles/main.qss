@@ -1,193 +1,313 @@
-/* ===========================
-   Omni-Local RAG — Main QSS
-   =========================== */
+/* ============================================================
+   Omni-Local RAG — macOS Dark Glass Theme
+   Adapted from macos_dark.qss (project-demo)
+   Accent : #7cd3b7 mint  →  rgba(92,178,233) sky-blue
+   Base   : rgba(10, 14, 20, 222)  near-black navy glass
+   ============================================================ */
 
 QWidget {
-    font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    color: #e7edf2;
+    font-family: "SF Pro Text", "Microsoft YaHei UI", ".SF NS Text",
+                 "Helvetica Neue", "Segoe UI", sans-serif;
     font-size: 13px;
-    color: #e0e0e0;
     background-color: transparent;
 }
 
-/* Spotlight container */
+/* ── Spotlight window container ──────────────────────────── */
 #SpotlightContainer {
-    background-color: rgba(30, 30, 46, 0.92);
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: rgba(10, 14, 20, 222);
+    border: 1px solid rgba(255, 255, 255, 26);
+    border-radius: 28px;
 }
 
+/* ── Search input ────────────────────────────────────────── */
 #SearchInput {
-    background-color: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: 15px;
-    color: #f0f0f0;
-    selection-background-color: #5e81f4;
+    background: rgba(255, 255, 255, 14);
+    border: 1px solid rgba(255, 255, 255, 18);
+    border-radius: 20px;
+    color: #f8fbfd;
+    font-size: 22px;
+    padding: 0 22px;
+    min-height: 48px;
+    selection-background-color: rgba(124, 211, 183, 90);
 }
 
 #SearchInput:focus {
-    border: 1px solid #5e81f4;
+    border: 1px solid rgba(124, 211, 183, 110);
+    background: rgba(255, 255, 255, 18);
 }
 
+/* ── Stop button ─────────────────────────────────────────── */
 #StopButton {
-    background-color: rgba(255, 85, 85, 0.25);
-    border: 1px solid rgba(255, 85, 85, 0.5);
-    border-radius: 6px;
-    color: #ff5555;
-    font-size: 11px;
+    background: rgba(255, 255, 255, 18);
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 14px;
+    color: #edf4fa;
+    font-size: 12px;
+    min-height: 36px;
+    padding: 0 14px;
 }
 
 #StopButton:hover {
-    background-color: rgba(255, 85, 85, 0.45);
+    background: rgba(255, 85, 85, 40);
+    border: 1px solid rgba(255, 85, 85, 90);
+    color: #ff8080;
 }
 
+/* ── Answer / streaming text area ───────────────────────── */
 #AnswerArea {
-    background-color: rgba(255, 255, 255, 0.04);
-    border: none;
-    border-radius: 8px;
-    padding: 8px;
-    color: #cdd6f4;
-    font-size: 13px;
+    background: rgba(255, 255, 255, 8);
+    border: 1px solid rgba(255, 255, 255, 14);
+    border-radius: 18px;
+    padding: 14px 18px;
+    color: #dbe5ef;
+    font-size: 14px;
     line-height: 1.6;
 }
 
+/* ── Cards scroll area ───────────────────────────────────── */
 #CardsScroll {
     border: none;
     background: transparent;
 }
 
-/* Result cards */
-#PDFCard, #VideoCard, #HybridCard {
-    background-color: rgba(49, 50, 68, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 4px;
+/* ── Result cards ────────────────────────────────────────── */
+#PDFCard,
+#VideoCard,
+#HybridCard {
+    background: rgba(255, 255, 255, 8);
+    border: 1px solid rgba(255, 255, 255, 14);
+    border-radius: 18px;
 }
 
-#PDFCard:hover, #VideoCard:hover {
-    border: 1px solid rgba(94, 129, 244, 0.6);
+#PDFCard:hover,
+#VideoCard:hover {
+    background: rgba(124, 211, 183, 20);
+    border: 1px solid rgba(124, 211, 183, 72);
 }
 
 #CardTitle {
+    color: #f7fbff;
+    font-size: 14px;
     font-weight: 600;
-    color: #cba6f7;
-    font-size: 12px;
 }
 
 #CardBody {
-    color: #a6adc8;
-    font-size: 12px;
+    color: #dbe5ef;
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 #CardThumb {
-    background-color: rgba(255, 255, 255, 0.06);
-    border-radius: 6px;
-    color: #6c7086;
+    background: rgba(255, 255, 255, 6);
+    border: 1px solid rgba(255, 255, 255, 20);
+    border-radius: 14px;
+    color: #8fd9c2;
     font-size: 11px;
 }
 
 #VideoThumb {
-    background-color: rgba(30, 30, 46, 0.9);
-    border-radius: 6px;
-    font-size: 22px;
-    color: #cba6f7;
-    border: 1px solid rgba(203, 166, 247, 0.3);
+    background: rgba(10, 14, 20, 180);
+    border: 1px solid rgba(255, 255, 255, 20);
+    border-radius: 14px;
+    color: #7cd3b7;
+    font-size: 26px;
 }
 
 #VideoThumb:hover {
-    background-color: rgba(94, 129, 244, 0.25);
-    border: 1px solid #5e81f4;
+    background: rgba(124, 211, 183, 28);
+    border: 1px solid rgba(124, 211, 183, 90);
 }
 
-/* Knowledge Editor */
+/* ── Knowledge Editor window ─────────────────────────────── */
 QMainWindow {
-    background-color: #1e1e2e;
+    background-color: rgba(10, 14, 20, 255);
 }
 
 QTabWidget::pane {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
+    background: rgba(255, 255, 255, 6);
+    border: 1px solid rgba(255, 255, 255, 16);
+    border-radius: 18px;
 }
 
 QTabBar::tab {
-    background-color: rgba(49, 50, 68, 0.8);
-    color: #a6adc8;
-    padding: 6px 18px;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
+    background: rgba(255, 255, 255, 10);
+    color: #9fb4c9;
+    padding: 7px 20px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    margin-right: 2px;
 }
 
 QTabBar::tab:selected {
-    background-color: #313244;
-    color: #cdd6f4;
-    border-bottom: 2px solid #5e81f4;
+    background: rgba(124, 211, 183, 28);
+    color: #ddfff2;
+    border-bottom: 2px solid rgba(124, 211, 183, 200);
 }
 
+QTabBar::tab:hover:!selected {
+    background: rgba(255, 255, 255, 18);
+    color: #edf4fa;
+}
+
+/* ── Generic buttons ─────────────────────────────────────── */
 QPushButton {
-    background-color: rgba(94, 129, 244, 0.2);
-    border: 1px solid rgba(94, 129, 244, 0.5);
-    border-radius: 6px;
-    padding: 5px 14px;
-    color: #cdd6f4;
+    background: rgba(255, 255, 255, 18);
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 14px;
+    color: #edf4fa;
+    min-height: 34px;
+    padding: 0 16px;
 }
 
 QPushButton:hover {
-    background-color: rgba(94, 129, 244, 0.4);
+    background: rgba(255, 255, 255, 28);
+    border: 1px solid rgba(124, 211, 183, 70);
 }
 
 QPushButton:pressed {
-    background-color: rgba(94, 129, 244, 0.6);
+    background: rgba(124, 211, 183, 50);
+    border: 1px solid rgba(124, 211, 183, 130);
 }
 
-QTextEdit, QLineEdit {
-    background-color: rgba(49, 50, 68, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    padding: 6px;
-    color: #cdd6f4;
+/* Accent / primary action button */
+QPushButton[accent="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(124, 211, 183, 220),
+        stop:1 rgba(92,  178, 233, 220));
+    border: 1px solid rgba(255, 255, 255, 28);
+    border-radius: 20px;
+    color: #081018;
+    font-weight: 600;
+    font-size: 14px;
 }
 
-QScrollBar:vertical {
-    width: 8px;
-    background: transparent;
+/* ── Text inputs ─────────────────────────────────────────── */
+QTextEdit,
+QLineEdit {
+    background: rgba(255, 255, 255, 10);
+    border: 1px solid rgba(255, 255, 255, 18);
+    border-radius: 14px;
+    padding: 8px 14px;
+    color: #e7edf2;
 }
 
-QScrollBar::handle:vertical {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-    min-height: 20px;
+QTextEdit:focus,
+QLineEdit:focus {
+    border: 1px solid rgba(124, 211, 183, 110);
+    background: rgba(255, 255, 255, 14);
 }
 
+/* ── Group boxes ─────────────────────────────────────────── */
 QGroupBox {
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    margin-top: 12px;
-    padding-top: 8px;
-    color: #a6adc8;
+    border: 1px solid rgba(255, 255, 255, 16);
+    border-radius: 18px;
+    margin-top: 14px;
+    padding-top: 10px;
+    color: #9fb4c9;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 10px;
-    color: #cba6f7;
+    left: 14px;
+    color: #8fd9c2;
+    font-weight: 600;
 }
 
+/* ── Progress bar ────────────────────────────────────────── */
 QProgressBar {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    background-color: rgba(49, 50, 68, 0.6);
+    background: rgba(255, 255, 255, 10);
+    border: 1px solid rgba(255, 255, 255, 16);
+    border-radius: 6px;
+    color: transparent;
+    height: 6px;
     text-align: center;
-    color: #cdd6f4;
-    height: 12px;
 }
 
 QProgressBar::chunk {
-    background-color: #5e81f4;
-    border-radius: 4px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 rgba(124, 211, 183, 220),
+        stop:1 rgba(92,  178, 233, 220));
+    border-radius: 6px;
 }
 
-mark {
-    background-color: #f9e2af;
-    color: #1e1e2e;
+/* ── Scroll bar ──────────────────────────────────────────── */
+QScrollBar:vertical {
+    background: transparent;
+    width: 12px;
+    margin: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 34);
+    border-radius: 6px;
+    min-height: 42px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(124, 211, 183, 90);
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: transparent;
+    border: none;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 12px;
+    margin: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(255, 255, 255, 34);
+    border-radius: 6px;
+    min-width: 42px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(124, 211, 183, 90);
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal {
+    background: transparent;
+    border: none;
+}
+
+/* ── Splitter handle ─────────────────────────────────────── */
+QSplitter::handle {
+    background: rgba(255, 255, 255, 16);
+    width: 1px;
+    height: 1px;
+}
+
+/* ── Label helpers ───────────────────────────────────────── */
+#SectionLabel {
+    color: #f0f6fb;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#HintLabel {
+    color: #8fa3b6;
+    font-size: 12px;
+}
+
+#StatusLabel {
+    color: #d7e3ee;
+}
+
+/* ── PDF / Video workbench panels ────────────────────────── */
+#PDFWorkbench,
+#VideoWorkbench {
+    background: rgba(255, 255, 255, 6);
+    border: 1px solid rgba(255, 255, 255, 14);
+    border-radius: 22px;
+    padding: 10px;
 }

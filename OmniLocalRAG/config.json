@@ -9,7 +9,7 @@
   },
   "embed": {
     "model_path": "models/bge-m3",
-    "device": "cpu"
+    "device": "cuda"
   },
   "retrieval": {
     "top_k": 5,

@@ -4,19 +4,19 @@
 #   pyinstaller OmniLocal.spec --noconfirm
 #   OR double-click build.bat
 
-import site
+import importlib.util
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # ---------------------------------------------------------------------------
 # Locate llama_cpp runtime DLLs (libllama.dll, llama.dll, ggml.dll)
+# Works in both venv and system Python (site.getsitepackages() is absent
+# in some venv configurations).
 # ---------------------------------------------------------------------------
 _llama_cpp_dir = None
-for _sp in site.getsitepackages():
-    _p = Path(_sp) / "llama_cpp"
-    if _p.is_dir():
-        _llama_cpp_dir = _p
-        break
+_spec = importlib.util.find_spec("llama_cpp")
+if _spec and _spec.submodule_search_locations:
+    _llama_cpp_dir = Path(list(_spec.submodule_search_locations)[0])
 
 _llama_binaries = []
 if _llama_cpp_dir:
@@ -38,6 +38,11 @@ _extra_datas = (
 # Hidden imports
 # ---------------------------------------------------------------------------
 hidden_imports = [
+    # jaraco — required by pkg_resources (setuptools 71+); PyInstaller misses it
+    "jaraco.text",
+    "jaraco.functools",
+    "jaraco.context",
+    "jaraco.collections",
     # Our own app modules (all subpackages)
     *collect_submodules("app"),
     # chromadb 0.5.x — heavy use of importlib dynamic loading
@@ -145,6 +150,7 @@ exe = EXE(
     upx=False,                   # UPX can corrupt native DLLs
     console=False,               # no console window
     icon=str(_icon_path) if _icon_path.exists() else None,
+    contents_directory=".",      # flatten _internal into dist dir (avoids build-path DLL error)
 )
 
 coll = COLLECT(

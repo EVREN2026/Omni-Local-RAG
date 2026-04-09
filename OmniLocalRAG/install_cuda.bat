@@ -94,14 +94,27 @@ echo [OK] llama-cpp-python installed
 
 REM ---------- Step 4: Remaining dependencies -----------------------
 echo.
-echo [4/5] Installing remaining dependencies ...
+echo [4/6] Installing remaining dependencies ...
 pip install -r requirements.txt --quiet
 if errorlevel 1 goto :error
 echo [OK] All dependencies installed
 
+REM ---------- Step 4b: Fix hnswlib (replace with chroma-hnswlib) ---
+REM   hnswlib prebuilt wheels on PyPI may use AVX-512 instructions
+REM   that cause "Windows fatal exception: access violation" at import.
+REM   chroma-hnswlib is chromadb's own fork compiled without AVX-512.
+echo.
+echo [5/6] Replacing hnswlib with chroma-hnswlib (AVX crash fix) ...
+pip uninstall hnswlib -y --quiet
+pip install chroma-hnswlib --quiet
+if errorlevel 1 (
+    echo [WARN] chroma-hnswlib install failed, keeping original hnswlib
+)
+echo [OK] hnswlib replaced
+
 REM ---------- Step 5: Write CUDA config ----------------------------
 echo.
-echo [5/5] Writing CUDA config ...
+echo [6/6] Writing CUDA config ...
 if "%CUDA_TAG%"=="cpu_fallback" (
     echo       llama-cpp fell back to CPU wheel -- setting n_gpu_layers=0
     python -c "import json,pathlib; p=pathlib.Path('config.json'); c=json.loads(p.read_text()); c['llm']['n_gpu_layers']=0; c['embed']['device']='cuda'; p.write_text(json.dumps(c,indent=2,ensure_ascii=False)); print('[OK] config.json: embed=cuda, llm=cpu')"

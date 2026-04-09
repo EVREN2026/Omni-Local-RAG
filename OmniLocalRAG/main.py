@@ -2,17 +2,33 @@
 Omni-Local RAG — Application Entry Point
 
 Launch order:
-1. Setup logger
+1. Setup logger + faulthandler
 2. Run startup dependency checks
 3. Initialize SQLite schema
-4. Start PyQt5 application
-5. Show StartupGuideDialog if files are missing, else main window
-6. Register global hotkey
-7. Start MemoryWatcher idle timer
+4. Connect ChromaDB  (non-fatal on failure)
+5. Load BGE-M3       (non-fatal on failure)
+6. Build controllers + views
+7. Register global hotkey
+8. Start MemoryWatcher idle timer
+9. Show tray icon → app.exec_()
 """
 
+import faulthandler
 import sys
 import time
+import traceback
+import os
+
+
+# 关键：强制将 venv 的 DLL 路径放到最前面，防止系统去 C:\Python3 找旧版 DLL
+venv_path = os.path.join(os.getcwd(), "venv", "Lib", "site-packages", "torch", "lib")
+if os.path.exists(venv_path):
+    os.add_dll_directory(venv_path)
+
+# 禁用 ChromaDB 自动加载默认 Embedding，防止它乱动 ONNX
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+# faulthandler prints a native backtrace on segfault / DLL abort
+faulthandler.enable()
 
 # -- Must be first PyQt5 import --
 from PyQt5.QtWidgets import QApplication
@@ -20,36 +36,74 @@ from PyQt5.QtWidgets import QApplication
 from app.utils.logger import logger
 
 
+def _except_hook(exc_type, exc_value, exc_tb):
+    """Catch and log any unhandled Python exception before the process dies."""
+    logger.critical("Unhandled exception — process will exit",
+                    exc_info=(exc_type, exc_value, exc_tb))
+    traceback.print_exception(exc_type, exc_value, exc_tb)
+
+
 def main() -> int:
+    sys.excepthook = _except_hook
     t_start = time.perf_counter()
 
     app = QApplication(sys.argv)
     app.setApplicationName("Omni-Local RAG")
     app.setQuitOnLastWindowClosed(False)  # keep alive after all windows closed
 
-    # --- Dependency checks ---
-    from app.utils import startup_check
-    startup_check.run_all()
-    missing = startup_check.missing_items()
-    if missing:
-        from app.views.startup_guide import StartupGuideDialog
-        dlg = StartupGuideDialog(missing)
-        if dlg.exec_() != StartupGuideDialog.Accepted:
-            return 1
+    # ------------------------------------------------------------------ #
+    # 1. Dependency checks
+    # ------------------------------------------------------------------ #
+    logger.info("Step 1/7 — startup checks")
+    try:
+        from app.utils import startup_check
+        startup_check.run_all()
+        missing = startup_check.missing_items()
+        if missing:
+            from app.views.startup_guide import StartupGuideDialog
+            dlg = StartupGuideDialog(missing)
+            if dlg.exec_() != StartupGuideDialog.Accepted:
+                logger.info("User closed startup guide — exiting")
+                return 1
+    except Exception:
+        logger.error("Startup check failed", exc_info=True)
 
-    # --- SQLite init ---
-    from app.models.sqlite_store import SQLiteStore
-    SQLiteStore().init()
+    # ------------------------------------------------------------------ #
+    # 2. SQLite
+    # ------------------------------------------------------------------ #
+    logger.info("Step 2/7 — SQLite init")
+    try:
+        from app.models.sqlite_store import SQLiteStore
+        SQLiteStore().init()
+    except Exception:
+        logger.error("SQLiteStore init failed", exc_info=True)
 
-    # --- Connect to ChromaDB ---
-    from app.models.chroma_store import ChromaStore
-    ChromaStore().connect()
+    # ------------------------------------------------------------------ #
+    # 3. ChromaDB  (non-fatal)
+    # ------------------------------------------------------------------ #
+    logger.info("Step 3/7 — ChromaDB connect")
+    try:
+        from app.models.chroma_store import ChromaStore
+        if not ChromaStore().connect():
+            logger.warning("ChromaDB unavailable — search disabled until restart")
+    except Exception:
+        logger.error("ChromaDB connect raised exception", exc_info=True)
 
-    # --- Load BGE-M3 (resident) ---
-    from app.models.embed_manager import EmbedManager
-    EmbedManager().load()
+    # ------------------------------------------------------------------ #
+    # 4. BGE-M3 embedding model  (non-fatal)
+    # ------------------------------------------------------------------ #
+    logger.info("Step 4/7 — loading BGE-M3 embedding model")
+    try:
+        from app.models.embed_manager import EmbedManager
+        if not EmbedManager().load():
+            logger.warning("EmbedManager failed — ingest/search disabled")
+    except Exception:
+        logger.error("EmbedManager load raised exception", exc_info=True)
 
-    # --- Controllers ---
+    # ------------------------------------------------------------------ #
+    # 5. Controllers
+    # ------------------------------------------------------------------ #
+    logger.info("Step 5/7 — creating controllers")
     from app.controllers.ingest_controller import IngestController
     from app.controllers.search_controller import SearchController
     from app.controllers.hotkey_controller import HotkeyController
@@ -59,21 +113,26 @@ def main() -> int:
     search_ctrl = SearchController()
     hotkey_ctrl = HotkeyController()
 
-    # --- Views ---
+    # ------------------------------------------------------------------ #
+    # 6. Views
+    # ------------------------------------------------------------------ #
+    logger.info("Step 6/7 — creating views")
     from app.views.knowledge_editor import KnowledgeEditor
     from app.views.spotlight_window import SpotlightWindow
     from app.views.tray_icon import TrayIcon
 
-    editor = KnowledgeEditor(ingest_ctrl, search_ctrl)
+    editor   = KnowledgeEditor(ingest_ctrl, search_ctrl)
     spotlight = SpotlightWindow()
-    tray = TrayIcon(app, spotlight, editor)
+    tray     = TrayIcon(app, spotlight, editor)
 
-    # --- MemoryWatcher ---
+    # ------------------------------------------------------------------ #
+    # 7. MemoryWatcher + hotkey + tray
+    # ------------------------------------------------------------------ #
+    logger.info("Step 7/7 — hotkey, MemoryWatcher, tray")
     watcher = MemoryWatcher()
     watcher.set_tray(tray)
     watcher.start()
 
-    # --- Hotkey ---
     registered = hotkey_ctrl.register()
     hotkey_ctrl.triggered.connect(spotlight.toggle)
     if not registered:
@@ -85,13 +144,23 @@ def main() -> int:
             "可能被其他软件占用，请在 config.json 中更换热键组合。",
         )
 
+    from PyQt5.QtWidgets import QSystemTrayIcon
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        logger.warning("System tray not available on this desktop — tray icon hidden")
+
     tray.show()
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
-    logger.info(f"Application started in {elapsed_ms:.0f}ms")
+    logger.info(f"Application ready in {elapsed_ms:.0f} ms — entering event loop")
 
     return app.exec_()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        traceback.print_exc()
+        logger.critical("Fatal error in main()", exc_info=True)
+        input("Press Enter to close …")   # keep window open so user can read it
+        sys.exit(1)
