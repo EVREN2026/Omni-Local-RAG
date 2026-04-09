@@ -1,4 +1,6 @@
+import faulthandler
 import json
+import os
 import sys
 import types
 import uuid
@@ -25,6 +27,15 @@ class ChromaStore:
     def connect(self) -> bool:
         if self._client is not None:
             return True
+        # Temporarily redirect faulthandler to devnull so WinError 1114 DLL
+        # crashes don't print "Windows fatal exception" noise to stderr.
+        # The Python ImportError is still caught by our except block below.
+        _devnull = open(os.devnull, "w")
+        try:
+            faulthandler.enable(file=_devnull)
+        except Exception:
+            _devnull = None
+
         try:
             # onnxruntime's DLL fails on this system (WinError 1114).
             # chromadb 0.5.x evaluates DefaultEmbeddingFunction() as a default
@@ -56,6 +67,14 @@ class ChromaStore:
         except Exception as e:
             logger.error(f"ChromaDB connect failed: {e}", exc_info=True)
             return False
+        finally:
+            # Restore faulthandler to stderr regardless of outcome.
+            try:
+                faulthandler.enable(file=sys.stderr)
+                if _devnull is not None:
+                    _devnull.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # CRUD
