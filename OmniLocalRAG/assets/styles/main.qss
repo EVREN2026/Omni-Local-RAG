@@ -1,0 +1,193 @@
+/* ===========================
+   Omni-Local RAG — Main QSS
+   =========================== */
+
+QWidget {
+    font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #e0e0e0;
+    background-color: transparent;
+}
+
+/* Spotlight container */
+#SpotlightContainer {
+    background-color: rgba(30, 30, 46, 0.92);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#SearchInput {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 15px;
+    color: #f0f0f0;
+    selection-background-color: #5e81f4;
+}
+
+#SearchInput:focus {
+    border: 1px solid #5e81f4;
+}
+
+#StopButton {
+    background-color: rgba(255, 85, 85, 0.25);
+    border: 1px solid rgba(255, 85, 85, 0.5);
+    border-radius: 6px;
+    color: #ff5555;
+    font-size: 11px;
+}
+
+#StopButton:hover {
+    background-color: rgba(255, 85, 85, 0.45);
+}
+
+#AnswerArea {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: none;
+    border-radius: 8px;
+    padding: 8px;
+    color: #cdd6f4;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+#CardsScroll {
+    border: none;
+    background: transparent;
+}
+
+/* Result cards */
+#PDFCard, #VideoCard, #HybridCard {
+    background-color: rgba(49, 50, 68, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 4px;
+}
+
+#PDFCard:hover, #VideoCard:hover {
+    border: 1px solid rgba(94, 129, 244, 0.6);
+}
+
+#CardTitle {
+    font-weight: 600;
+    color: #cba6f7;
+    font-size: 12px;
+}
+
+#CardBody {
+    color: #a6adc8;
+    font-size: 12px;
+}
+
+#CardThumb {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    color: #6c7086;
+    font-size: 11px;
+}
+
+#VideoThumb {
+    background-color: rgba(30, 30, 46, 0.9);
+    border-radius: 6px;
+    font-size: 22px;
+    color: #cba6f7;
+    border: 1px solid rgba(203, 166, 247, 0.3);
+}
+
+#VideoThumb:hover {
+    background-color: rgba(94, 129, 244, 0.25);
+    border: 1px solid #5e81f4;
+}
+
+/* Knowledge Editor */
+QMainWindow {
+    background-color: #1e1e2e;
+}
+
+QTabWidget::pane {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+}
+
+QTabBar::tab {
+    background-color: rgba(49, 50, 68, 0.8);
+    color: #a6adc8;
+    padding: 6px 18px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+QTabBar::tab:selected {
+    background-color: #313244;
+    color: #cdd6f4;
+    border-bottom: 2px solid #5e81f4;
+}
+
+QPushButton {
+    background-color: rgba(94, 129, 244, 0.2);
+    border: 1px solid rgba(94, 129, 244, 0.5);
+    border-radius: 6px;
+    padding: 5px 14px;
+    color: #cdd6f4;
+}
+
+QPushButton:hover {
+    background-color: rgba(94, 129, 244, 0.4);
+}
+
+QPushButton:pressed {
+    background-color: rgba(94, 129, 244, 0.6);
+}
+
+QTextEdit, QLineEdit {
+    background-color: rgba(49, 50, 68, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px;
+    color: #cdd6f4;
+}
+
+QScrollBar:vertical {
+    width: 8px;
+    background: transparent;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QGroupBox {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    margin-top: 12px;
+    padding-top: 8px;
+    color: #a6adc8;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    color: #cba6f7;
+}
+
+QProgressBar {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    background-color: rgba(49, 50, 68, 0.6);
+    text-align: center;
+    color: #cdd6f4;
+    height: 12px;
+}
+
+QProgressBar::chunk {
+    background-color: #5e81f4;
+    border-radius: 4px;
+}
+
+mark {
+    background-color: #f9e2af;
+    color: #1e1e2e;
+}

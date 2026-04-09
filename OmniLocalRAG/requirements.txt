@@ -1,0 +1,40 @@
+# Omni-Local RAG ¡ª Python Dependencies
+# Install: pip install -r requirements.txt
+
+# GUI
+PyQt5==5.15.10
+# PyQt5-Qt5 is pulled in automatically by PyQt5; explicit pin causes resolver conflicts
+
+# LLM inference
+# NOTE: install separately BEFORE this file: pip install llama-cpp-python --prefer-binary
+llama-cpp-python==0.3.9
+
+# Vector store (0.5.x uses standard hnswlib with PyPI prebuilt wheels, no MSVC needed)
+chromadb==0.5.23
+
+# Embeddings
+sentence-transformers==2.7.0
+
+# PDF parsing
+docling==1.0.0
+PyMuPDF==1.24.0
+
+# OCR fallback
+pytesseract==0.3.10
+Pillow==10.3.0
+
+# ASR
+faster-whisper==1.0.3
+
+# Audio waveform
+librosa==0.10.2
+soundfile==0.12.1
+
+# Global hotkey
+keyboard==0.13.5
+
+# Packaging
+pyinstaller==6.6.0
+
+# Utilities
+numpy==1.26.4

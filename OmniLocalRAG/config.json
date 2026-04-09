@@ -1,0 +1,26 @@
+{
+  "llm": {
+    "model_path": "models/gemma-2-2b-it-q4_k_m.gguf",
+    "n_gpu_layers": 0,
+    "n_ctx": 4096,
+    "max_tokens": 512,
+    "temperature": 0.7,
+    "repeat_penalty": 1.1
+  },
+  "embed": {
+    "model_path": "models/bge-m3",
+    "device": "cpu"
+  },
+  "retrieval": {
+    "top_k": 5,
+    "distance_threshold": 0.7
+  },
+  "ui": {
+    "hotkey": "alt+space",
+    "window_width": 680,
+    "window_opacity": 0.95,
+    "animation_ms": 80
+  },
+  "idle_timeout_minutes": 10,
+  "log_retention_days": 30
+}
