@@ -3,7 +3,6 @@ from typing import Optional
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from app.controllers.memory_watcher import MemoryWatcher
-from app.models.llm_manager import LLMManager
 from app.workers.inference_worker import InferenceWorker
 from app.utils.logger import logger
 
@@ -26,8 +25,6 @@ class SearchController(QObject):
             self._worker.cancel()
             self._worker.wait(500)
 
-        # Ensure LLM is loaded (triggers lazy load if needed)
-        LLMManager().load()
         MemoryWatcher().reset()
 
         self._worker = InferenceWorker(query)

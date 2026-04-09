@@ -37,15 +37,23 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+_cache: dict = {}
+
+
 def load() -> dict:
+    global _cache
+    if _cache:
+        return _cache
     if _CONFIG_PATH.exists():
         try:
             with open(_CONFIG_PATH, encoding="utf-8") as f:
                 user = json.load(f)
-            return _deep_merge(_DEFAULT, user)
+            _cache = _deep_merge(_DEFAULT, user)
+            return _cache
         except Exception:
             pass
-    return dict(_DEFAULT)
+    _cache = dict(_DEFAULT)
+    return _cache
 
 
 def get(key_path: str, default: Any = None) -> Any:

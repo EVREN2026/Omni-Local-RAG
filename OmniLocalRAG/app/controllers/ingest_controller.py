@@ -40,9 +40,9 @@ class IngestController(QObject):
 
     def re_embed_chunk(self, chunk_id: str, new_content: str) -> None:
         """Hot-update one chunk; runs inline (called from edit workbench after save)."""
-        worker = IngestWorker.__new__(IngestWorker)
-        QObject.__init__(worker)
-        worker.re_embed(chunk_id, new_content)
+        # re_embed() only uses EmbedManager/ChromaStore singletons — no threading needed.
+        # Pass empty file_path; IngestWorker.__init__ stores it but re_embed never reads it.
+        IngestWorker("").re_embed(chunk_id, new_content)
 
     def transcribe_video(self, video_path: str) -> None:
         if self._asr_worker and self._asr_worker.isRunning():

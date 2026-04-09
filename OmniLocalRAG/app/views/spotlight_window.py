@@ -226,7 +226,9 @@ class SpotlightWindow(QWidget):
         self._cursor_timer.stop()
         text = self._answer.toPlainText()
         if text.endswith("▋"):
-            self._answer.textCursor().deletePreviousChar()
+            cursor = self._answer.textCursor()
+            cursor.deletePreviousChar()
+            self._answer.setTextCursor(cursor)
         self._stop_btn.hide()
 
     def _on_error(self, msg: str) -> None:

@@ -90,8 +90,6 @@ class PDFCard(QFrame):
             # Try absolute path stored in payload
             file_path = Path(file_name)
         try:
-            url = f"file:///{file_path}#page={page}"
-            import subprocess
             os.startfile(str(file_path))
         except Exception as e:
             logger.error(f"Open PDF failed: {e}")
