@@ -7,15 +7,22 @@ echo   For users with NVIDIA GPU + CUDA drivers installed
 echo ============================================================
 echo.
 
-REM ---------- Python check -----------------------------------------
+REM ---------- Python check (try 'python' then 'py' launcher) ------
+set PY=python
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python not found. Install Python 3.10/3.11/3.12 (x64)
-    echo         https://www.python.org/downloads/
-    pause & exit /b 1
+    set PY=py
+    py --version >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Python not found. Install Python 3.10/3.11/3.12 ^(x64^)
+        echo         https://www.python.org/downloads/
+        echo         Tip: run this script from the activated venv shell:
+        echo           .\venv\Scripts\activate  ^&^&  .\install_cuda.bat
+        pause & exit /b 1
+    )
 )
-for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PY_VER=%%v
-echo [OK] Python %PY_VER%
+for /f "tokens=2" %%v in ('%PY% --version 2^>^&1') do set PY_VER=%%v
+echo [OK] Python %PY_VER% ^(via %PY%^)
 
 REM ---------- NVIDIA GPU / CUDA check ------------------------------
 nvidia-smi >nul 2>&1
@@ -65,14 +72,14 @@ echo [OK] Using wheel tag: %CUDA_TAG%
 REM ---------- Step 1: Upgrade pip ----------------------------------
 echo.
 echo [1/5] Upgrading pip ...
-python -m pip install --upgrade pip --quiet
+%PY% -m pip install --upgrade pip --quiet
 if errorlevel 1 goto :error
 echo [OK] pip upgraded
 
 REM ---------- Step 2: PyTorch CUDA wheel ---------------------------
 echo.
 echo [2/5] Installing PyTorch %CUDA_TAG% build ...
-pip install torch torchvision torchaudio ^
+%PY% -m pip install torch torchvision torchaudio ^
     --index-url https://download.pytorch.org/whl/%CUDA_TAG% ^
     --quiet
 if errorlevel 1 goto :error
@@ -81,12 +88,12 @@ echo [OK] PyTorch %CUDA_TAG% installed
 REM ---------- Step 3: llama-cpp-python CUDA prebuilt ---------------
 echo.
 echo [3/5] Installing llama-cpp-python %CUDA_TAG% prebuilt wheel ...
-pip install "llama-cpp-python==0.3.9" --prefer-binary --quiet ^
+%PY% -m pip install "llama-cpp-python==0.3.9" --prefer-binary --quiet ^
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/%CUDA_TAG%
 if errorlevel 1 (
     echo       Prebuilt CUDA wheel unavailable, falling back to CPU wheel ...
-    echo       (You can still run the model; GPU layers will be 0)
-    pip install "llama-cpp-python==0.3.9" --prefer-binary --quiet
+    echo       ^(You can still run the model; GPU layers will be 0^)
+    %PY% -m pip install "llama-cpp-python==0.3.9" --prefer-binary --quiet
     if errorlevel 1 goto :llama_error
     set CUDA_TAG=cpu_fallback
 )
@@ -94,59 +101,46 @@ echo [OK] llama-cpp-python installed
 
 REM ---------- Step 4: Remaining dependencies -----------------------
 echo.
-echo [4/6] Installing remaining dependencies ...
-pip install -r requirements.txt --quiet
+echo [4/5] Installing remaining dependencies ...
+%PY% -m pip install -r requirements.txt --quiet
 if errorlevel 1 goto :error
 echo [OK] All dependencies installed
 
-REM ---------- Step 4b: Fix hnswlib (replace with chroma-hnswlib) ---
-REM   hnswlib prebuilt wheels on PyPI may use AVX-512 instructions
-REM   that cause "Windows fatal exception: access violation" at import.
-REM   chroma-hnswlib is chromadb's own fork compiled without AVX-512.
-echo.
-echo [5/6] Replacing hnswlib with chroma-hnswlib (AVX crash fix) ...
-pip uninstall hnswlib -y --quiet
-pip install chroma-hnswlib --quiet
-if errorlevel 1 (
-    echo [WARN] chroma-hnswlib install failed, keeping original hnswlib
-)
-echo [OK] hnswlib replaced
-
 REM ---------- Step 5: Write CUDA config ----------------------------
 echo.
-echo [6/6] Writing CUDA config ...
+echo [5/5] Writing CUDA config ...
 if "%CUDA_TAG%"=="cpu_fallback" (
     echo       llama-cpp fell back to CPU wheel -- setting n_gpu_layers=0
-    python -c "import json,pathlib; p=pathlib.Path('config.json'); c=json.loads(p.read_text()); c['llm']['n_gpu_layers']=0; c['embed']['device']='cuda'; p.write_text(json.dumps(c,indent=2,ensure_ascii=False)); print('[OK] config.json: embed=cuda, llm=cpu')"
+    %PY% -c "import json,pathlib; p=pathlib.Path('config.json'); c=json.loads(p.read_text()); c['llm']['n_gpu_layers']=0; c['embed']['device']='cuda'; p.write_text(json.dumps(c,indent=2,ensure_ascii=False)); print('[OK] config.json: embed=cuda, llm=cpu')"
 ) else (
     REM n_gpu_layers=999 -> llama-cpp offloads ALL layers that fit in VRAM
-    python -c "import json,pathlib; p=pathlib.Path('config.json'); c=json.loads(p.read_text()); c['llm']['n_gpu_layers']=999; c['embed']['device']='cuda'; p.write_text(json.dumps(c,indent=2,ensure_ascii=False)); print('[OK] config.json: embed=cuda, llm n_gpu_layers=999 (full offload)')"
+    %PY% -c "import json,pathlib; p=pathlib.Path('config.json'); c=json.loads(p.read_text()); c['llm']['n_gpu_layers']=999; c['embed']['device']='cuda'; p.write_text(json.dumps(c,indent=2,ensure_ascii=False)); print('[OK] config.json: embed=cuda, llm n_gpu_layers=999 (full offload)')"
 )
 if errorlevel 1 goto :error
 
 REM ---------- Smoke test ------------------------------------------
 echo.
 echo --- Import smoke test ------------------------------------------
-python -c "import torch; print('  torch', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
-python -c "import torch; print('  GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
-python -c "import chromadb;              print('  chromadb          OK')"
-python -c "import llama_cpp;             print('  llama-cpp-python  OK')"
-python -c "import sentence_transformers; print('  sentence-transformers OK')"
-python -c "import PyQt5;                 print('  PyQt5             OK')"
+%PY% -c "import torch; print('  torch', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
+%PY% -c "import torch; print('  GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
+%PY% -c "import numpy;                 print('  numpy             OK')"
+%PY% -c "import llama_cpp;             print('  llama-cpp-python  OK')"
+%PY% -c "import sentence_transformers; print('  sentence-transformers OK')"
+%PY% -c "import PyQt5;                 print('  PyQt5             OK')"
 
 echo.
 echo ============================================================
-echo   [DONE] CUDA installation complete  (%CUDA_TAG%)
-echo   Place model files in models\  then run: python main.py
+echo   [DONE] CUDA installation complete  ^(%CUDA_TAG%^)
+echo   Place model files in models\  then run: %PY% main.py
 echo   Tip: adjust n_gpu_layers in config.json to tune VRAM usage
-echo        999 = full offload  |  0 = CPU only  |  e.g. 20 = partial
+echo        999 = full offload  ^|  0 = CPU only  ^|  e.g. 20 = partial
 echo ============================================================
 pause & exit /b 0
 
 :llama_error
 echo.
 echo [ERROR] Could not install llama-cpp-python.
-echo         Ensure Python 3.10 / 3.11 / 3.12 (x64) and internet access.
+echo         Ensure Python 3.10 / 3.11 / 3.12 ^(x64^) and internet access.
 pause & exit /b 1
 
 :error
