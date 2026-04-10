@@ -12,6 +12,7 @@ OmniLocalRAG/models/
 .claude/
 .vscode/
 .idea/
+OmniLocalRAG/.codex
 
 # Data
 data/

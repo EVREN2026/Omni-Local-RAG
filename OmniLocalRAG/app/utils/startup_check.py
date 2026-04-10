@@ -35,13 +35,18 @@ CHECKS: List[CheckItem] = [
         download_url="https://huggingface.co/BAAI/bge-m3",
     ),
     CheckItem(
-        label="ChromaDB 数据目录",
-        path="data/chroma",
+        label="VectorStore 数据目录",
+        path="data/vectors",
         auto_create=True,
     ),
     CheckItem(
         label="SQLite 数据库",
         path="data/omni.db",
+        auto_create=True,
+    ),
+    CheckItem(
+        label="元数据导出目录",
+        path=cfg.get("exports.path", "data/exports"),
         auto_create=True,
     ),
     CheckItem(

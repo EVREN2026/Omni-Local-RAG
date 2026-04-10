@@ -1,4 +1,4 @@
-# Omni-Local RAG ¡ª Python Dependencies
+# Omni-Local RAG ï¿½ï¿½ Python Dependencies
 # Install: pip install -r requirements.txt
 
 # GUI
@@ -9,8 +9,7 @@ PyQt5==5.15.10
 # NOTE: install separately BEFORE this file: pip install llama-cpp-python --prefer-binary
 llama-cpp-python==0.3.9
 
-# Vector store (0.5.x uses standard hnswlib with PyPI prebuilt wheels, no MSVC needed)
-chromadb==0.5.23
+# Vector store: replaced with built-in SQLite + numpy (no chromadb / hnswlib DLL needed)
 
 # Embeddings
 sentence-transformers==2.7.0

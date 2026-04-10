@@ -115,6 +115,7 @@ class IngestWorker(QThread):
         total = len(chunks)
         logger.info(f"IngestWorker: {total} chunks from {self.file_path}")
 
+        export_rows: List[dict] = []
         for i, chunk in enumerate(chunks):
             try:
                 [vec] = embed.encode([chunk["content"]])
@@ -133,8 +134,31 @@ class IngestWorker(QThread):
                 )
                 self.chunk_indexed.emit(chunk["id"])
                 self.progress.emit(i + 1, total)
+                export_rows.append(
+                    {
+                        "chunk_id": chunk["id"],
+                        "anchor_id": chunk["id"],
+                        "source_type": "pdf",
+                        "page": chunk["page"],
+                        "coords": chunk["coords"],
+                        "content": chunk["content"],
+                        "vector_dim": len(vec),
+                        "stored": True,
+                        "is_manual": False,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Chunk ingest failed: {e}", exc_info=True)
+
+        try:
+            from app.models.metadata_exporter import MetadataExporter
+
+            MetadataExporter().export_pdf_chunks(
+                source_file=self.file_path,
+                chunks=export_rows,
+            )
+        except Exception as e:
+            logger.error(f"PDF metadata export failed: {e}", exc_info=True)
 
         if is_degraded:
             self.degraded_mode.emit("已降级为基础 OCR 模式")

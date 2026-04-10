@@ -24,6 +24,11 @@ _DEFAULT: dict = {
     },
     "idle_timeout_minutes": 10,
     "log_retention_days": 30,
+    "exports": {
+        "path": "data/exports",
+        "write_json": True,
+        "write_markdown": True,
+    },
 }
 
 

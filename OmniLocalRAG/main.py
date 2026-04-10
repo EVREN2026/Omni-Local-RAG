@@ -5,8 +5,8 @@ Launch order:
 1. Setup logger + faulthandler
 2. Run startup dependency checks
 3. Initialize SQLite schema
-4. Connect ChromaDB  (non-fatal on failure)
-5. Load BGE-M3       (non-fatal on failure)
+4. Connect VectorStore  (non-fatal on failure)
+5. Load BGE-M3          (non-fatal on failure)
 6. Build controllers + views
 7. Register global hotkey
 8. Start MemoryWatcher idle timer
@@ -25,8 +25,6 @@ venv_path = os.path.join(os.getcwd(), "venv", "Lib", "site-packages", "torch", "
 if os.path.exists(venv_path):
     os.add_dll_directory(venv_path)
 
-# 禁用 ChromaDB 自动加载默认 Embedding，防止它乱动 ONNX
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
 # faulthandler prints a native backtrace on segfault / DLL abort
 faulthandler.enable()
 
@@ -79,15 +77,15 @@ def main() -> int:
         logger.error("SQLiteStore init failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
-    # 3. ChromaDB  (non-fatal)
+    # 3. VectorStore  (non-fatal)
     # ------------------------------------------------------------------ #
-    logger.info("Step 3/7 — ChromaDB connect")
+    logger.info("Step 3/7 — VectorStore connect")
     try:
         from app.models.chroma_store import ChromaStore
         if not ChromaStore().connect():
-            logger.warning("ChromaDB unavailable — search disabled until restart")
+            logger.warning("VectorStore unavailable — search disabled until restart")
     except Exception:
-        logger.error("ChromaDB connect raised exception", exc_info=True)
+        logger.error("VectorStore connect raised exception", exc_info=True)
 
     # ------------------------------------------------------------------ #
     # 4. BGE-M3 embedding model  (non-fatal)
