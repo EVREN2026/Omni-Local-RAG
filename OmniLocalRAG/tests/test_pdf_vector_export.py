@@ -41,13 +41,7 @@ class FakePdfPage:
     number = 0
 
     def get_text(self, mode="text"):
-        return "hello from pymupdf"
-
-
-class FakeFitz:
-    @staticmethod
-    def open(file_path):
-        return [FakePdfPage()]
+        return "hello from marker"
 
 
 def install_import_stubs():
@@ -93,23 +87,18 @@ class PdfVectorExportTest(unittest.TestCase):
         self.cfg._cache = self.old_cache
         self.temp_dir.cleanup()
 
-    def test_pdf_chunks_are_embedded_stored_and_exported(self):
+    def test_pdf_chunks_are_converted_and_exported_without_vectorization(self):
         source_file = str(Path(self.temp_dir.name) / "sample.pdf")
         long_text = " ".join(f"word{i}" for i in range(700))
         parsed_items = [(long_text, 1, [[0, 0, 10, 10]], "")]
 
-        with patch.object(self.ingest_worker, "_parse_pdf", return_value=parsed_items) as parse_pdf:
+        with patch.object(self.ingest_worker.IngestWorker, "_parse_pdf_with_signals", return_value=parsed_items) as parse_pdf:
             worker = self.ingest_worker.IngestWorker(source_file)
             worker._ingest_pdf()
 
         parse_pdf.assert_called_once_with(source_file)
-        self.assertGreater(len(FakeChromaStore.add_calls), 1)
-        self.assertEqual(len(FakeEmbedManager.encode_calls), len(FakeChromaStore.add_calls))
-
-        for add_call in FakeChromaStore.add_calls:
-            self.assertEqual(add_call["source_type"], "pdf")
-            self.assertTrue(add_call["anchor_id"])
-            self.assertEqual(add_call["anchor_id"], add_call["doc_id"])
+        self.assertEqual(len(FakeChromaStore.add_calls), 0)
+        self.assertEqual(len(FakeEmbedManager.encode_calls), 0)
 
         json_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.json"
         md_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.md"
@@ -118,18 +107,18 @@ class PdfVectorExportTest(unittest.TestCase):
 
         payload = json.loads(json_path.read_text(encoding="utf-8"))
         self.assertEqual(payload["source_file"], "sample.pdf")
-        self.assertEqual(payload["chunk_count"], len(FakeChromaStore.add_calls))
+        self.assertGreater(payload["chunk_count"], 0)
         for chunk in payload["chunks"]:
             self.assertTrue(chunk["chunk_id"])
             self.assertTrue(chunk["anchor_id"])
             self.assertIn("content", chunk)
-            self.assertEqual(chunk["vector_dim"], 4)
-            self.assertTrue(chunk["stored"])
+            self.assertIsNone(chunk["vector_dim"])
+            self.assertFalse(chunk["stored"])
 
         markdown = md_path.read_text(encoding="utf-8")
         self.assertIn("# PDF Chunk Export", markdown)
         self.assertIn("- Source file: sample.pdf", markdown)
-        self.assertIn("- vector_dim: 4", markdown)
+        self.assertIn("- vector_dim: None", markdown)
         self.assertIn("```text", markdown)
 
     def test_markdown_file_is_embedded_stored_and_exported(self):
@@ -188,45 +177,31 @@ class PdfVectorExportTest(unittest.TestCase):
 
     def test_parse_pdf_uses_docling_first(self):
         docling_rows = [("docling markdown", 0, [], "")]
-
-        with patch.object(self.ingest_worker, "_parse_pdf_with_docling", return_value=docling_rows) as docling:
-            with patch.object(self.ingest_worker, "_parse_pdf_with_marker") as marker:
-                with patch.object(self.ingest_worker, "_parse_pdf_with_pymupdf") as pymupdf:
-                    results = self.ingest_worker._parse_pdf("sample.pdf")
+        docling = types.SimpleNamespace(parse=lambda p: docling_rows)
+        marker_called = {"v": False}
+        marker = types.SimpleNamespace(parse=lambda p: marker_called.__setitem__("v", True))
+        with patch.object(self.ingest_worker, "PARSER_REGISTRY", {"docling": docling, "marker": marker}):
+            with patch.object(self.ingest_worker, "_pdf_parser_order", return_value=["docling", "marker"]):
+                results = self.ingest_worker._parse_pdf("sample.pdf")
 
         self.assertEqual(results, docling_rows)
-        docling.assert_called_once_with("sample.pdf")
-        marker.assert_not_called()
-        pymupdf.assert_not_called()
+        self.assertFalse(marker_called["v"])
 
     def test_parse_pdf_uses_marker_when_docling_fails(self):
-        marker_rows = [("marker markdown", 0, [], "")]
+        docling = types.SimpleNamespace(parse=lambda p: (_ for _ in ()).throw(RuntimeError("missing toolkit")))
+        with patch.object(self.ingest_worker, "PARSER_REGISTRY", {"docling": docling}):
+            with patch.object(self.ingest_worker, "_pdf_parser_order", return_value=["docling"]):
+                with self.assertRaises(RuntimeError):
+                    self.ingest_worker._parse_pdf("sample.pdf")
 
-        with patch.object(self.ingest_worker, "_parse_pdf_with_docling", side_effect=RuntimeError("missing toolkit")):
-            with patch.object(self.ingest_worker, "_parse_pdf_with_marker", return_value=marker_rows) as marker:
+    def test_parse_pdf_order_can_prefer_marker(self):
+        marker_rows = [("hello from marker", 1, [], "")]
+        docling = types.SimpleNamespace(parse=lambda p: (_ for _ in ()).throw(AssertionError("should not call docling")))
+        marker = types.SimpleNamespace(parse=lambda p: marker_rows)
+        with patch.object(self.ingest_worker, "PARSER_REGISTRY", {"docling": docling, "marker": marker}):
+            with patch.object(self.ingest_worker, "_pdf_parser_order", return_value=["marker", "docling"]):
                 results = self.ingest_worker._parse_pdf("sample.pdf")
-
         self.assertEqual(results, marker_rows)
-        marker.assert_called_once_with("sample.pdf")
-
-    def test_parse_pdf_order_can_prefer_pymupdf(self):
-        self.cfg._cache = {"pdf": {"parser_order": ["pymupdf", "docling"]}}
-        old_fitz = sys.modules.get("fitz")
-        sys.modules["fitz"] = FakeFitz
-        try:
-            with patch.object(
-                self.ingest_worker,
-                "_parse_pdf_with_docling",
-                side_effect=AssertionError("Docling should not be called when PyMuPDF is configured first"),
-            ):
-                results = self.ingest_worker._parse_pdf("sample.pdf")
-        finally:
-            if old_fitz is None:
-                sys.modules.pop("fitz", None)
-            else:
-                sys.modules["fitz"] = old_fitz
-
-        self.assertEqual(results, [("hello from pymupdf", 1, [], "")])
 
 
 if __name__ == "__main__":

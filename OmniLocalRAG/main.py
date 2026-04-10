@@ -19,6 +19,17 @@ import time
 import traceback
 import os
 
+# ---------------------------------------------------------------------- #
+# Block ALL HuggingFace / transformers network access.
+# All model files must be present locally before launch.
+# startup_check.py verifies this and shows the guide if anything is missing.
+# Without these env vars, sentence-transformers silently downloads missing
+# files from HuggingFace Hub whenever it can't find them on disk.
+# ---------------------------------------------------------------------- #
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
 
 # 关键：强制将 venv 的 DLL 路径放到最前面，防止系统去 C:\Python3 找旧版 DLL
 venv_path = os.path.join(os.getcwd(), "venv", "Lib", "site-packages", "torch", "lib")

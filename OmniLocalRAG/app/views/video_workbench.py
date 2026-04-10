@@ -4,10 +4,14 @@ ASR segments are displayed as colour-coded blocks on a timeline.
 User presses I (in-point) and O (out-point) to mark a clip, then
 Enter to confirm and enter a semantic summary.
 """
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QUrl
+from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
 from PyQt5.QtWidgets import (
     QDialog,
@@ -45,6 +49,7 @@ class VideoWorkbench(QWidget):
         self._segments: List[dict] = []
         self._mark_in: Optional[float] = None
         self._mark_out: Optional[float] = None
+        self._player_failed = False
         self._build()
         self._connect_signals()
 
@@ -70,6 +75,9 @@ class VideoWorkbench(QWidget):
         ctrl_row = QHBoxLayout()
         self._play_btn = QPushButton("▶ 播放")
         self._play_btn.clicked.connect(self._toggle_play)
+        self._open_external_btn = QPushButton("外部播放")
+        self._open_external_btn.setToolTip("当 Qt 内置播放器不支持当前编码时，使用系统默认播放器打开")
+        self._open_external_btn.clicked.connect(self._open_in_system_player)
         self._pos_label = QLabel("00:00")
 
         btn_mark_in = QPushButton("[I] 标记开始")
@@ -79,7 +87,14 @@ class VideoWorkbench(QWidget):
         btn_confirm = QPushButton("↵ 确认切片")
         btn_confirm.clicked.connect(self._confirm_clip)
 
-        for w in (self._play_btn, self._pos_label, btn_mark_in, btn_mark_out, btn_confirm):
+        for w in (
+            self._play_btn,
+            self._open_external_btn,
+            self._pos_label,
+            btn_mark_in,
+            btn_mark_out,
+            btn_confirm,
+        ):
             ctrl_row.addWidget(w)
         ctrl_row.addStretch()
         layout.addLayout(ctrl_row)
@@ -98,6 +113,11 @@ class VideoWorkbench(QWidget):
         self._player = QMediaPlayer(self)
         self._player.positionChanged.connect(self._on_position_changed)
         self._player.durationChanged.connect(self._on_duration_changed)
+        self._player.mediaStatusChanged.connect(self._on_media_status_changed)
+        if hasattr(self._player, "error"):
+            self._player.error.connect(self._on_player_error)
+        if hasattr(self._player, "errorOccurred"):
+            self._player.errorOccurred.connect(self._on_player_error)
 
     def _connect_signals(self) -> None:
         self._ingest.asr_segment_ready.connect(self._on_asr_segment)
@@ -109,12 +129,17 @@ class VideoWorkbench(QWidget):
         self._segments = []
         self._mark_in = None
         self._mark_out = None
+        self._player_failed = False
         self._status.setText(f"已加载: {Path(video_path).name}  (ASR 转写中…)")
         self._progress.setValue(0)
         self._progress.show()
-        self._player.setMedia(QMediaContent(
-            __import__("PyQt5.QtCore", fromlist=["QUrl"]).QUrl.fromLocalFile(video_path)
-        ))
+        self._player.setMedia(QMediaContent(QUrl.fromLocalFile(video_path)))
+        # Fallback duration probe for environments where DirectShow cannot decode
+        # the stream but we still want timeline-based slicing.
+        probed_duration = _probe_duration_seconds(video_path)
+        if probed_duration > 0:
+            self._duration_sec = probed_duration
+            self._timeline.set_duration(self._duration_sec)
 
     # ------------------------------------------------------------------
     # ASR signal handlers
@@ -138,6 +163,9 @@ class VideoWorkbench(QWidget):
     # ------------------------------------------------------------------
 
     def _toggle_play(self) -> None:
+        if not self._video_path:
+            QMessageBox.warning(self, "提示", "请先导入视频")
+            return
         if self._player.state() == QMediaPlayer.PlayingState:
             self._player.pause()
             self._play_btn.setText("▶ 播放")
@@ -157,6 +185,38 @@ class VideoWorkbench(QWidget):
         self._duration_sec = ms / 1000
         self._timeline.set_duration(self._duration_sec)
 
+    def _on_media_status_changed(self, status) -> None:
+        if status == QMediaPlayer.InvalidMedia:
+            self._player_failed = True
+            self._play_btn.setEnabled(False)
+            self._status.setText("播放器不支持该视频编码。可使用“外部播放”或转码为 H264/AAC MP4。")
+
+    def _on_player_error(self, *args) -> None:
+        code = args[0] if args else None
+        message = self._player.errorString() if hasattr(self._player, "errorString") else ""
+        logger.error(f"Video player error: code={code}, message={message or 'unknown'}")
+        self._player_failed = True
+        self._play_btn.setEnabled(False)
+        hint = "播放器解码失败。常见原因是当前 Qt/DirectShow 不支持该编码（如错误 0x80040266）。"
+        self._status.setText(f"{hint} 请点“外部播放”或先转码为 H264/AAC MP4。")
+
+    def _open_in_system_player(self) -> None:
+        if not self._video_path:
+            QMessageBox.warning(self, "提示", "请先导入视频")
+            return
+        path = str(Path(self._video_path))
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+            self._status.setText("已在系统默认播放器中打开视频")
+        except Exception as e:
+            logger.error(f"Open system player failed: {e}", exc_info=True)
+            QMessageBox.warning(self, "错误", f"打开系统播放器失败: {e}")
+
     # ------------------------------------------------------------------
     # Clip marking
     # ------------------------------------------------------------------
@@ -175,6 +235,9 @@ class VideoWorkbench(QWidget):
         self._mark_label.setText(f"In: {i}  Out: {o}")
 
     def _confirm_clip(self) -> None:
+        if not self._video_path:
+            QMessageBox.warning(self, "提示", "请先导入视频")
+            return
         if self._mark_in is None or self._mark_out is None:
             QMessageBox.warning(self, "提示", "请先标记开始(I)和结束(O)点")
             return
@@ -197,7 +260,25 @@ class VideoWorkbench(QWidget):
         logger.info(f"Clip created: {clip_id} [{_fmt(self._mark_in)}-{_fmt(self._mark_out)}]")
 
         # Ingest clip to vector store
-        self._ingest.ingest_file.__doc__  # no-op; actual clip ingestion handled by IngestController
+        ok = self._ingest.ingest_video_clip(
+            clip_id=clip_id,
+            video_file=Path(self._video_path).name,
+            start_sec=self._mark_in,
+            end_sec=self._mark_out,
+            semantic_summary=summary.strip(),
+        )
+        if not ok:
+            QMessageBox.warning(self, "提示", "切片已保存到本地库，但向量化失败，请检查日志")
+
+        self._segments.append({
+            "start": self._mark_in,
+            "end": self._mark_out,
+            "text": summary.strip(),
+            "confidence": 1.0,
+            "is_clip": True,
+        })
+        self._clip_list_label.setText(f"已标记片段：{sum(1 for s in self._segments if s.get('is_clip'))} 个")
+
         # Emit for parent to refresh combo boxes
         self.clip_created.emit({
             "id": clip_id,
@@ -299,3 +380,22 @@ def _fmt(sec: Optional[float]) -> str:
         return "--"
     s = int(sec)
     return f"{s // 60:02d}:{s % 60:02d}"
+
+
+def _probe_duration_seconds(video_path: str) -> float:
+    """Best-effort duration probe; returns 0.0 when unavailable."""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    try:
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip()
+        return max(float(out), 0.0) if out else 0.0
+    except Exception:
+        return 0.0

@@ -31,11 +31,36 @@
   "pdf": {
     "parser_order": [
       "docling",
+      "unstructured",
+      "mineru",
       "marker",
-      "pymupdf",
       "ocr"
     ],
-    "marker_device": "cpu"
+    "marker_device": "cpu",
+    "mineru_cmd": "mineru",
+    "index_on_import": false,
+    "ocr_lang": "chi_sim+eng",
+    "parser_options": {
+      "docling": {
+      },
+      "unstructured": {
+        "strategy": "auto",
+        "languages": "eng,chi_sim"
+      },
+      "mineru": {
+        "command": "mineru",
+        "extra_args": ""
+      },
+      "marker": {
+        "device": "cpu"
+      },
+      "ocr": {
+        "lang": "chi_sim+eng",
+        "scale": 2
+      }
+    },
+    "start_page": 0,
+    "end_page": 0
   },
   "asr": {
     "subprocess": true,

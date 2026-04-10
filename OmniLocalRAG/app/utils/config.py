@@ -30,8 +30,17 @@ _DEFAULT: dict = {
         "keep_heading_path": True,
     },
     "pdf": {
-        "parser_order": ["docling", "marker", "pymupdf", "ocr"],
+        "parser_order": ["docling", "unstructured", "mineru", "marker", "ocr"],
         "marker_device": "cpu",
+        "mineru_cmd": "mineru",
+        "index_on_import": False,
+        "parser_options": {
+            "docling": {},
+            "unstructured": {"strategy": "auto", "languages": "eng,chi_sim"},
+            "mineru": {"command": "mineru", "extra_args": ""},
+            "marker": {"device": "cpu"},
+            "ocr": {"lang": "chi_sim+eng", "scale": 2},
+        },
     },
     "asr": {
         "subprocess": True,

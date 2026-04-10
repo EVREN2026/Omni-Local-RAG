@@ -11,6 +11,8 @@ class CheckItem:
     path: str
     auto_create: bool = False
     download_url: str = ""
+    # Extra required child paths that must exist inside `path` (for model dirs)
+    required_children: List[str] = field(default_factory=list)
     ok: bool = field(default=False, init=False)
     message: str = field(default="", init=False)
 
@@ -18,14 +20,21 @@ class CheckItem:
         p = cfg.abs_path(self.path)
         if self.auto_create:
             p.mkdir(parents=True, exist_ok=True) if not p.suffix else p.touch()
-        self.ok = p.exists()
+        exists = p.exists()
+        if exists and self.required_children:
+            missing_children = [c for c in self.required_children if not (p / c).exists()]
+            if missing_children:
+                self.ok = False
+                self.message = f"模型目录不完整，缺少: {', '.join(missing_children)}"
+                return False
+        self.ok = exists
         self.message = "OK" if self.ok else f"缺失: {p}"
         return self.ok
 
 
 CHECKS: List[CheckItem] = [
     CheckItem(
-        label="GGUF 模型文件 (Gemma-2-2B)",
+        label="GGUF 模型文件",
         path=cfg.get("llm.model_path", "models/gemma-2-2b-it-q4_k_m.gguf"),
         download_url="https://huggingface.co/bartowski/gemma-2-2b-it-GGUF",
     ),
@@ -33,6 +42,15 @@ CHECKS: List[CheckItem] = [
         label="BGE-M3 Embedding 模型",
         path=cfg.get("embed.model_path", "models/bge-m3"),
         download_url="https://huggingface.co/BAAI/bge-m3",
+        # These files must exist inside the model directory.
+        # If any is absent, sentence-transformers would fall back to a network
+        # download, which we want to prevent entirely.
+        required_children=[
+            "pytorch_model.bin",
+            "tokenizer.json",
+            "config.json",
+            "modules.json",
+        ],
     ),
     CheckItem(
         label="VectorStore 数据目录",
@@ -57,6 +75,11 @@ CHECKS: List[CheckItem] = [
     CheckItem(
         label="缩略图缓存目录",
         path="data/thumbs",
+        auto_create=True,
+    ),
+    CheckItem(
+        label="API 任务模板目录",
+        path="data/templates",
         auto_create=True,
     ),
 ]

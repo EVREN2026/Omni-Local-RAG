@@ -80,6 +80,8 @@ class MetadataExporter:
             "source_type": chunk.get("source_type", "pdf"),
             "page": chunk.get("page", 0),
             "coords": MetadataExporter._json_safe(chunk.get("coords", [])),
+            "heading_path": str(chunk.get("heading_path", "")),
+            "block_type": str(chunk.get("block_type", "text")),
             "content": str(chunk.get("content", "")),
             "vector_dim": chunk.get("vector_dim"),
             "stored": bool(chunk.get("stored", False)),
@@ -111,15 +113,23 @@ class MetadataExporter:
         for index, chunk in enumerate(payload["chunks"], start=1):
             content = str(chunk.get("content", ""))
             fence = "````" if "```" in content else "```"
+            heading_path = chunk.get("heading_path", "")
+            block_type = chunk.get("block_type", "text")
+            meta_lines = [
+                f"- chunk_id: {chunk.get('chunk_id', '')}",
+                f"- anchor_id: {chunk.get('anchor_id', '')}",
+                f"- page: {chunk.get('page', 0)}",
+                f"- vector_dim: {chunk.get('vector_dim')}",
+                f"- stored: {str(chunk.get('stored', False)).lower()}",
+                f"- block_type: {block_type}",
+            ]
+            if heading_path:
+                meta_lines.append(f"- heading_path: {heading_path}")
             lines.extend(
                 [
                     f"## Chunk {index}",
                     "",
-                    f"- chunk_id: {chunk.get('chunk_id', '')}",
-                    f"- anchor_id: {chunk.get('anchor_id', '')}",
-                    f"- page: {chunk.get('page', 0)}",
-                    f"- vector_dim: {chunk.get('vector_dim')}",
-                    f"- stored: {str(chunk.get('stored', False)).lower()}",
+                    *meta_lines,
                     "",
                     f"{fence}text",
                     content,

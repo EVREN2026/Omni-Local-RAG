@@ -19,6 +19,8 @@ docling==1.0.0
 PyMuPDF==1.24.0
 # Optional high-throughput PDF-to-Markdown parser:
 #   pip install marker-pdf
+unstructured==0.15.7
+mineru==2.0.6
 
 # OCR fallback
 pytesseract==0.3.10

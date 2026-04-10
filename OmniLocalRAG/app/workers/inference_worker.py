@@ -11,12 +11,18 @@ from app.utils import config as cfg
 from app.utils.logger import logger
 
 _RAG_PROMPT_TEMPLATE = """\
-以下是从知识库中检索到的相关内容：
+以下是从知识库中检索到的相关内容（共 {chunk_count} 条，编号 [1]–[{chunk_count}]）：
 
 {context}
 
 ---
-请根据以上内容，用中文回答下面的问题。如果检索内容不足以回答，请直接说明。
+请严格遵守以下规则回答问题：
+1. 只能使用上方检索内容作答，不得引入检索内容之外的知识补充关键事实。
+2. 回答时用 [序号] 标注来源，例如"根据 [1] ..."。
+3. 如果上方内容不足以回答，请直接说"当前知识库中没有找到足够的相关信息"，不要猜测。
+4. 对操作步骤类问题，请输出编号分步答案（第1步、第2步...）。
+5. 对参数类问题，请以表格或字段解释形式输出。
+6. 用中文回答。
 
 问题：{query}
 
@@ -27,8 +33,11 @@ def _build_prompt(query: str, results: list) -> str:
     context_parts = []
     for i, r in enumerate(results, 1):
         source = r.get("anchor_id") or r.get("id", "")
-        context_parts.append(f"[{i}] {r['document']}  (来源: {source})")
+        doc = str(r.get("document") or r.get("content") or "").strip()
+        context_parts.append(f"[{i}] {doc}\n    （来源 chunk: {source}）")
+    chunk_count = len(results)
     return _RAG_PROMPT_TEMPLATE.format(
+        chunk_count=chunk_count,
         context="\n\n".join(context_parts),
         query=query,
     )

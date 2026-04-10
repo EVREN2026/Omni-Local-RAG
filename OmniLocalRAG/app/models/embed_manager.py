@@ -87,7 +87,25 @@ class EmbedManager:
 
     def _new_model(self, model_cls, device: str):
         model_path = str(cfg.abs_path(cfg.get("embed.model_path")))
-        return model_cls(model_path, device=device)
+        # Global offline guard: even on older sentence-transformers versions that
+        # do not accept local_files_only, keep HF stack in offline mode.
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
+        # Prefer explicit local-only loading when supported.
+        try:
+            return model_cls(model_path, device=device, local_files_only=True)
+        except TypeError as e:
+            msg = str(e)
+            if "local_files_only" not in msg or "unexpected keyword argument" not in msg:
+                raise
+            # Backward compatibility for older sentence-transformers constructor.
+            logger.warning(
+                "SentenceTransformer does not support local_files_only; "
+                "falling back to legacy constructor with offline env guards"
+            )
+            return model_cls(model_path, device=device)
 
     def _resolve_device(self, requested_device: str) -> str:
         device = (requested_device or "cpu").strip().lower()

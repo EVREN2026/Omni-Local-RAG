@@ -44,16 +44,18 @@ class FakeCuda:
 
 class FakeSentenceTransformer:
     loaded_devices = []
+    loaded_kwargs = []          # captures extra kwargs passed at construction
     fail_cuda_load_once = False
     fail_cuda_encode_once = False
 
-    def __init__(self, model_path, device="cpu"):
+    def __init__(self, model_path, device="cpu", **kwargs):
         if device.startswith("cuda") and self.__class__.fail_cuda_load_once:
             self.__class__.fail_cuda_load_once = False
             raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
         self.model_path = model_path
         self.device = device
         self.__class__.loaded_devices.append(device)
+        self.__class__.loaded_kwargs.append(kwargs)
 
     def encode(self, texts, normalize_embeddings=True, show_progress_bar=False):
         if self.device.startswith("cuda") and self.__class__.fail_cuda_encode_once:
@@ -68,6 +70,18 @@ class FakeVectors:
 
     def tolist(self):
         return self.values
+
+
+class LegacySentenceTransformer:
+    loaded_devices = []
+
+    def __init__(self, model_path, device="cpu"):
+        self.model_path = model_path
+        self.device = device
+        self.__class__.loaded_devices.append(device)
+
+    def encode(self, texts, normalize_embeddings=True, show_progress_bar=False):
+        return FakeVectors([[1.0, 0.0] for _ in texts])
 
 
 class EmbedManagerDeviceTest(unittest.TestCase):
@@ -109,6 +123,7 @@ class EmbedManagerDeviceTest(unittest.TestCase):
         self.embed_manager.EmbedManager._last_error = ""
         FakeCuda.reset()
         FakeSentenceTransformer.loaded_devices = []
+        FakeSentenceTransformer.loaded_kwargs = []
         FakeSentenceTransformer.fail_cuda_load_once = False
         FakeSentenceTransformer.fail_cuda_encode_once = False
 
@@ -131,6 +146,11 @@ class EmbedManagerDeviceTest(unittest.TestCase):
 
         self.assertEqual(FakeSentenceTransformer.loaded_devices, ["cpu"])
         self.assertEqual(manager.encode(["hello"]), [[1.0, 0.0]])
+        # local_files_only must be set to prevent any HuggingFace Hub download
+        self.assertTrue(
+            all(kw.get("local_files_only") for kw in FakeSentenceTransformer.loaded_kwargs),
+            "EmbedManager must pass local_files_only=True to prevent network downloads",
+        )
 
     def test_cuda_runtime_load_error_falls_back_to_cpu(self):
         FakeCuda.arch_list = ["sm_120"]
@@ -162,6 +182,22 @@ class EmbedManagerDeviceTest(unittest.TestCase):
 
         self.assertEqual(vectors, [[1.0, 0.0]])
         self.assertEqual(FakeSentenceTransformer.loaded_devices, ["cuda"])
+
+    def test_legacy_sentence_transformer_without_local_files_only_still_loads(self):
+        fake_sentence_transformers = types.ModuleType("sentence_transformers")
+        fake_sentence_transformers.SentenceTransformer = LegacySentenceTransformer
+        old = sys.modules.get("sentence_transformers")
+        sys.modules["sentence_transformers"] = fake_sentence_transformers
+        LegacySentenceTransformer.loaded_devices = []
+        self.embed_manager.EmbedManager._instance = None
+        self.embed_manager.EmbedManager._model = None
+        try:
+            manager = self.embed_manager.EmbedManager()
+            self.assertTrue(manager.load())
+            self.assertEqual(manager.encode(["hello"]), [[1.0, 0.0]])
+            self.assertEqual(LegacySentenceTransformer.loaded_devices, ["cpu"])
+        finally:
+            self._restore_module("sentence_transformers", old)
 
     @staticmethod
     def _restore_module(name, old_module):
