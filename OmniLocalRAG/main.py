@@ -36,6 +36,9 @@ from app.utils.logger import logger
 
 def _except_hook(exc_type, exc_value, exc_tb):
     """Catch and log any unhandled Python exception before the process dies."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        logger.info("Interrupted by user")
+        return
     logger.critical("Unhandled exception — process will exit",
                     exc_info=(exc_type, exc_value, exc_tb))
     traceback.print_exception(exc_type, exc_value, exc_tb)
@@ -88,15 +91,9 @@ def main() -> int:
         logger.error("VectorStore connect raised exception", exc_info=True)
 
     # ------------------------------------------------------------------ #
-    # 4. BGE-M3 embedding model  (non-fatal)
+    # 4. BGE-M3 embedding model  (lazy)
     # ------------------------------------------------------------------ #
-    logger.info("Step 4/7 — loading BGE-M3 embedding model")
-    try:
-        from app.models.embed_manager import EmbedManager
-        if not EmbedManager().load():
-            logger.warning("EmbedManager failed — ingest/search disabled")
-    except Exception:
-        logger.error("EmbedManager load raised exception", exc_info=True)
+    logger.info("Step 4/7 — BGE-M3 embedding model will load on first use")
 
     # ------------------------------------------------------------------ #
     # 5. Controllers

@@ -17,6 +17,8 @@ sentence-transformers==2.7.0
 # PDF parsing
 docling==1.0.0
 PyMuPDF==1.24.0
+# Optional high-throughput PDF-to-Markdown parser:
+#   pip install marker-pdf
 
 # OCR fallback
 pytesseract==0.3.10

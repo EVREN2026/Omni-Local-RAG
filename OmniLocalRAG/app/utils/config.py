@@ -7,6 +7,8 @@ _CONFIG_PATH = _BASE / "config.json"
 
 _DEFAULT: dict = {
     "llm": {
+        "enabled": True,
+        "subprocess": True,
         "model_path": "models/gemma-2-2b-it-q4_k_m.gguf",
         "n_gpu_layers": 0,
         "n_ctx": 4096,
@@ -16,6 +18,30 @@ _DEFAULT: dict = {
     },
     "embed": {"model_path": "models/bge-m3", "device": "cpu"},
     "retrieval": {"top_k": 5, "distance_threshold": 0.7},
+    "qa_memory": {
+        "enabled": True,
+        "path": "data/eval/qa_dialogue_memory.md",
+        "jsonl_path": "data/eval/qa_dialogue_memory.jsonl",
+        "max_context_chars": 1200,
+    },
+    "chunking": {
+        "max_chars": 1800,
+        "overlap_chars": 240,
+        "keep_heading_path": True,
+    },
+    "pdf": {
+        "parser_order": ["docling", "marker", "pymupdf", "ocr"],
+        "marker_device": "cpu",
+    },
+    "asr": {
+        "subprocess": True,
+        "model_size": "base",
+        "device": "cpu",
+        "compute_type": "int8",
+        "language": "zh",
+        "beam_size": 5,
+        "vad_filter": True,
+    },
     "ui": {
         "hotkey": "alt+space",
         "window_width": 680,

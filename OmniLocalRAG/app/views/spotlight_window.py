@@ -1,6 +1,6 @@
 from typing import Optional
 
-from PyQt5.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRect, Qt, QTimer
+from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer
 from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import (
     QApplication,
@@ -33,6 +33,8 @@ class SpotlightWindow(QWidget):
         self._anim: Optional[QPropertyAnimation] = None
         self._cursor_timer = QTimer(self)
         self._cursor_visible = True
+        self._dragging = False
+        self._drag_offset = QPoint()
 
         self._setup_flags()
         self._build_ui()
@@ -65,8 +67,13 @@ class SpotlightWindow(QWidget):
         root.addWidget(self._container)
 
         layout = QVBoxLayout(self._container)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(16, 10, 16, 12)
         layout.setSpacing(8)
+
+        self._drag_handle = QLabel("Omni-Local RAG")
+        self._drag_handle.setObjectName("SpotlightDragHandle")
+        self._drag_handle.setCursor(Qt.OpenHandCursor)
+        layout.addWidget(self._drag_handle)
 
         # --- Input row ---
         input_row = QHBoxLayout()
@@ -111,6 +118,8 @@ class SpotlightWindow(QWidget):
         layout.addWidget(self._cards_scroll)
 
         self.adjustSize()
+        self._container.installEventFilter(self)
+        self._drag_handle.installEventFilter(self)
 
     def _connect_signals(self) -> None:
         self._input.returnPressed.connect(self._on_search)
@@ -245,6 +254,30 @@ class SpotlightWindow(QWidget):
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj not in (self._container, self._drag_handle):
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            self._dragging = True
+            self._drag_offset = event.globalPos() - self.frameGeometry().topLeft()
+            self._drag_handle.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return True
+
+        if event.type() == QEvent.MouseMove and self._dragging and event.buttons() & Qt.LeftButton:
+            self.move(event.globalPos() - self._drag_offset)
+            event.accept()
+            return True
+
+        if event.type() == QEvent.MouseButtonRelease and self._dragging:
+            self._dragging = False
+            self._drag_handle.setCursor(Qt.OpenHandCursor)
+            event.accept()
+            return True
+
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Escape:

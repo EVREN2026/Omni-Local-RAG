@@ -6,6 +6,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from app.models.chroma_store import ChromaStore
 from app.models.embed_manager import EmbedManager
 from app.models.llm_manager import LLMManager
+from app.models.qa_memory import QAMemoryRecorder
 from app.utils import config as cfg
 from app.utils.logger import logger
 
@@ -31,6 +32,41 @@ def _build_prompt(query: str, results: list) -> str:
         context="\n\n".join(context_parts),
         query=query,
     )
+
+
+def _build_retrieval_answer(results: list, reason: str = "") -> str:
+    lines = []
+    if reason:
+        lines.extend([reason, ""])
+    lines.append("以下是当前检索到的相关内容：")
+    lines.append("")
+    for i, result in enumerate(results, 1):
+        source = result.get("anchor_id") or result.get("id", "")
+        document = str(result.get("document") or result.get("content") or "").strip()
+        if len(document) > 900:
+            document = document[:900].rstrip() + "..."
+        lines.extend(
+            [
+                f"## 结果 {i}",
+                f"- 来源: {source}",
+                "",
+                document,
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
+def _record_qa_memory(query: str, results: list, answer: str, mode: str) -> None:
+    try:
+        QAMemoryRecorder().record(
+            query=query,
+            retrieved_context=results,
+            answer=answer,
+            mode=mode,
+        )
+    except Exception as e:
+        logger.error(f"QA memory record failed: {e}", exc_info=True)
 
 
 class InferenceWorker(QThread):
@@ -63,28 +99,50 @@ class InferenceWorker(QThread):
             self.context_retrieved.emit(results)
 
             if not results:
-                self.token_generated.emit("（未检索到相关内容，请先导入知识文档）")
+                answer = "（未检索到相关内容，请先导入知识文档）"
+                self.token_generated.emit(answer)
+                _record_qa_memory(self.query, results, answer, mode="no_results")
                 self.generation_finished.emit(True)
                 return
 
             # Step 2: build prompt & generate
             prompt = _build_prompt(self.query, results)
+            if not cfg.get("llm.enabled", True):
+                answer = _build_retrieval_answer(
+                    results,
+                    "本地 LLM 当前已禁用，先展示 VectorStore 检索结果。",
+                )
+                self.token_generated.emit(answer)
+                _record_qa_memory(self.query, results, answer, mode="retrieval_only")
+                self.generation_finished.emit(True)
+                return
+
             if not llm.load():
-                self.error_occurred.emit("模型加载失败，请检查 models/ 目录")
-                self.generation_finished.emit(False)
+                detail = llm.last_error or "请检查 models/ 目录和 llama-cpp-python 安装"
+                answer = _build_retrieval_answer(
+                    results,
+                    f"本地 LLM 加载失败，已降级为检索结果直出。\n原因：{detail}",
+                )
+                self.token_generated.emit(answer)
+                _record_qa_memory(self.query, results, answer, mode="llm_load_failed")
+                self.generation_finished.emit(True)
                 return
 
             t1 = time.perf_counter()
             token_count = 0
+            answer_parts = []
             for token in llm.generate(prompt, stream=True):
                 if self._cancelled:
                     break
                 self.token_generated.emit(token)
+                answer_parts.append(token)
                 token_count += 1
 
             elapsed = time.perf_counter() - t1
             tps = token_count / elapsed if elapsed > 0 else 0
             logger.info(f"Generation: {token_count} tokens @ {tps:.1f} tok/s")
+            if not self._cancelled:
+                _record_qa_memory(self.query, results, "".join(answer_parts), mode="llm")
             self.generation_finished.emit(not self._cancelled)
 
         except MemoryError:

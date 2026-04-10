@@ -8,7 +8,7 @@ from app.utils import config as cfg
 
 
 class MetadataExporter:
-    """Write human-reviewable PDF ingest metadata without affecting runtime stores."""
+    """Write human-reviewable ingest metadata without affecting runtime stores."""
 
     def __init__(
         self,
@@ -23,13 +23,23 @@ class MetadataExporter:
         self.write_markdown = cfg.get("exports.write_markdown", True) if write_markdown is None else write_markdown
 
     def export_pdf_chunks(self, source_file: str, chunks: Iterable[Dict[str, Any]]) -> Dict[str, Path]:
+        return self.export_chunks(source_file=source_file, chunks=chunks, source_type="pdf")
+
+    def export_chunks(
+        self,
+        source_file: str,
+        chunks: Iterable[Dict[str, Any]],
+        source_type: str,
+    ) -> Dict[str, Path]:
         source = Path(source_file)
-        export_dir = self.export_root / "pdf"
+        source_type = self._safe_source_type(source_type)
+        export_dir = self.export_root / source_type
         export_dir.mkdir(parents=True, exist_ok=True)
 
         normalized_chunks = [self._normalize_chunk(chunk) for chunk in chunks]
         payload = {
             "source_file": source.name,
+            "source_type": source_type,
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "chunk_count": len(normalized_chunks),
             "chunks": normalized_chunks,
@@ -51,6 +61,11 @@ class MetadataExporter:
             paths["markdown"] = md_path
 
         return paths
+
+    @staticmethod
+    def _safe_source_type(source_type: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", source_type or "").strip("._")
+        return cleaned or "document"
 
     @staticmethod
     def _safe_stem(source: Path) -> str:
@@ -81,10 +96,13 @@ class MetadataExporter:
 
     @staticmethod
     def _render_markdown(payload: Dict[str, Any]) -> str:
+        source_type = str(payload.get("source_type", "document"))
+        label = "PDF" if source_type.lower() == "pdf" else source_type.title()
         lines: List[str] = [
-            "# PDF Chunk Export",
+            f"# {label} Chunk Export",
             "",
             f"- Source file: {payload['source_file']}",
+            f"- Source type: {source_type}",
             f"- Chunk count: {payload['chunk_count']}",
             f"- Exported at: {payload['exported_at']}",
             "",

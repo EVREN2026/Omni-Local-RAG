@@ -45,9 +45,12 @@ class KnowledgeEditor(QMainWindow):
         toolbar = QHBoxLayout()
         btn_import_pdf = QPushButton("导入 PDF")
         btn_import_pdf.clicked.connect(self._import_pdf)
+        btn_import_md = QPushButton("导入 Markdown")
+        btn_import_md.clicked.connect(self._import_markdown)
         btn_import_video = QPushButton("导入视频")
         btn_import_video.clicked.connect(self._import_video)
         toolbar.addWidget(btn_import_pdf)
+        toolbar.addWidget(btn_import_md)
         toolbar.addWidget(btn_import_video)
         toolbar.addStretch()
         root.addLayout(toolbar)
@@ -99,6 +102,14 @@ class KnowledgeEditor(QMainWindow):
             self._status_label.setText(f"正在导入: {path}")
             self._ingest.ingest_file(path)
             self._pdf_bench.load_file(path)
+
+    def _import_markdown(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 Markdown 文件", "", "Markdown Files (*.md *.markdown)"
+        )
+        if path:
+            self._status_label.setText(f"正在导入 Markdown: {path}")
+            self._ingest.ingest_file(path)
 
     def _import_video(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

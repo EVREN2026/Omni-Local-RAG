@@ -1,7 +1,9 @@
 {
   "llm": {
-    "model_path": "models/gemma-2-2b-it-q4_k_m.gguf",
-    "n_gpu_layers": 999,
+    "enabled": true,
+    "subprocess": true,
+    "model_path": "models/gemma-2-2b-it-Q4_K_M.gguf",
+    "n_gpu_layers": 0,
     "n_ctx": 4096,
     "max_tokens": 512,
     "temperature": 0.7,
@@ -9,11 +11,40 @@
   },
   "embed": {
     "model_path": "models/bge-m3",
-    "device": "cuda"
+    "device": "cpu"
   },
   "retrieval": {
     "top_k": 5,
     "distance_threshold": 0.7
+  },
+  "qa_memory": {
+    "enabled": true,
+    "path": "data/eval/qa_dialogue_memory.md",
+    "jsonl_path": "data/eval/qa_dialogue_memory.jsonl",
+    "max_context_chars": 1200
+  },
+  "chunking": {
+    "max_chars": 1800,
+    "overlap_chars": 240,
+    "keep_heading_path": true
+  },
+  "pdf": {
+    "parser_order": [
+      "docling",
+      "marker",
+      "pymupdf",
+      "ocr"
+    ],
+    "marker_device": "cpu"
+  },
+  "asr": {
+    "subprocess": true,
+    "model_size": "base",
+    "device": "cpu",
+    "compute_type": "int8",
+    "language": "zh",
+    "beam_size": 5,
+    "vad_filter": true
   },
   "ui": {
     "hotkey": "alt+space",

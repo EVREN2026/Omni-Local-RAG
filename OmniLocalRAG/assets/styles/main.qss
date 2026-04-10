@@ -20,6 +20,14 @@ QWidget {
     border-radius: 28px;
 }
 
+#SpotlightDragHandle {
+    color: rgba(231, 237, 242, 150);
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 16px;
+    padding: 0 8px;
+}
+
 /* ── Search input ────────────────────────────────────────── */
 #SearchInput {
     background: rgba(255, 255, 255, 14);

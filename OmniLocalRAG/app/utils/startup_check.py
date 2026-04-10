@@ -50,6 +50,11 @@ CHECKS: List[CheckItem] = [
         auto_create=True,
     ),
     CheckItem(
+        label="问答评测记忆目录",
+        path="data/eval",
+        auto_create=True,
+    ),
+    CheckItem(
         label="缩略图缓存目录",
         path="data/thumbs",
         auto_create=True,
