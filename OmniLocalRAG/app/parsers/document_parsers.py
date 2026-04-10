@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -40,8 +41,16 @@ class BaseDocumentParser(ABC):
     parameters: Tuple[ParserParameter, ...] = ()
 
     @abstractmethod
-    def parse(self, file_path: str) -> ParsedItems:
+    def to_markdown(self, file_path: str) -> str:
         raise NotImplementedError
+
+    def parse(self, file_path: str) -> ParsedItems:
+        markdown = self.to_markdown(file_path)
+        # Import chunker after parser execution to avoid early GUI/DLL side
+        # effects (notably on Windows when some parser backends load ONNX).
+        from app.workers.ingest_worker import _markdown_to_items
+
+        return _markdown_to_items(markdown) if markdown.strip() else []
 
     def get_option(self, key: str, default: Any = None) -> Any:
         return cfg.get(f"pdf.parser_options.{self.name}.{key}", default)
@@ -54,17 +63,95 @@ class DoclingParser(BaseDocumentParser):
     name = "docling"
     display_name = "Docling"
 
-    def parse(self, file_path: str) -> ParsedItems:
+    def to_markdown(self, file_path: str) -> str:
+        isolated = bool(self.get_option("isolated", True))
+        timeout_sec = int(self.get_option("timeout_sec", 120))
+
+        try:
+            if isolated:
+                return self._convert_docling_isolated(file_path, timeout_sec)
+            return self._convert_docling_inline(file_path)
+        except Exception:
+            # Docling upstream model artifacts have changed several times. Keep
+            # parser usability by falling back to deterministic local text
+            # extraction instead of hard-failing import workflows.
+            return self._pymupdf_fallback(file_path)
+
+    @staticmethod
+    def _convert_docling_inline(file_path: str) -> str:
         from docling.document_converter import DocumentConverter  # type: ignore
-        from app.workers.ingest_worker import _docling_items_to_chunks, _markdown_to_items
 
         converter = DocumentConverter()
         result = converter.convert(file_path)
         doc = getattr(result, "document", result)
         if hasattr(doc, "export_to_markdown"):
-            markdown = doc.export_to_markdown()
-            return _markdown_to_items(markdown)
-        return _docling_items_to_chunks(doc)
+            return doc.export_to_markdown()
+        lines = []
+        for item in doc.iterate_items():
+            text = getattr(item, "text", "") or ""
+            if text.strip():
+                lines.append(text.strip())
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _convert_docling_isolated(file_path: str, timeout_sec: int) -> str:
+        helper_code = r"""
+import pathlib
+import sys
+import traceback
+
+src = sys.argv[1]
+out = sys.argv[2]
+
+try:
+    from docling.document_converter import DocumentConverter
+
+    converter = DocumentConverter()
+    result = converter.convert(src)
+    doc = getattr(result, "document", result)
+    if hasattr(doc, "export_to_markdown"):
+        markdown = doc.export_to_markdown()
+    else:
+        lines = []
+        for item in doc.iterate_items():
+            text = getattr(item, "text", "") or ""
+            if text.strip():
+                lines.append(text.strip())
+        markdown = "\n\n".join(lines)
+    pathlib.Path(out).write_text(markdown, encoding="utf-8")
+except Exception:
+    traceback.print_exc()
+    sys.exit(2)
+"""
+        with tempfile.TemporaryDirectory() as td:
+            out_path = Path(td) / "docling_output.md"
+            proc = subprocess.run(
+                [sys.executable, "-c", helper_code, file_path, str(out_path)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max(10, timeout_sec),
+            )
+            if proc.returncode == 0 and out_path.exists():
+                return out_path.read_text(encoding="utf-8", errors="replace")
+            detail = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(f"Docling isolated process failed: {detail or f'exit={proc.returncode}'}")
+
+    @staticmethod
+    def _pymupdf_fallback(file_path: str) -> str:
+        import fitz  # type: ignore
+
+        parts: List[str] = []
+        doc = fitz.open(file_path)
+        try:
+            for page in doc:
+                text = (page.get_text("text") or "").strip()
+                if text:
+                    parts.append(f"<!-- page: {page.number + 1} -->\n\n{text}")
+        finally:
+            doc.close()
+        return "\n\n".join(parts).strip()
 
 
 class MarkerParser(BaseDocumentParser):
@@ -80,18 +167,17 @@ class MarkerParser(BaseDocumentParser):
         ),
     )
 
-    def parse(self, file_path: str) -> ParsedItems:
+    def to_markdown(self, file_path: str) -> str:
         from marker.converters.pdf import PdfConverter  # type: ignore
         from marker.models import create_model_dict  # type: ignore
         from marker.output import text_from_rendered  # type: ignore
-        from app.workers.ingest_worker import _markdown_to_items
 
         device = self.get_option("device", cfg.get("pdf.marker_device", "cpu"))
         os.environ.setdefault("TORCH_DEVICE", str(device))
         converter = PdfConverter(artifact_dict=create_model_dict())
         rendered = converter(file_path)
         markdown, _, _ = text_from_rendered(rendered)
-        return _markdown_to_items(markdown)
+        return markdown
 
 
 class UnstructuredParser(BaseDocumentParser):
@@ -108,9 +194,8 @@ class UnstructuredParser(BaseDocumentParser):
         ParserParameter("languages", "语言列表", "text", "eng,chi_sim"),
     )
 
-    def parse(self, file_path: str) -> ParsedItems:
+    def to_markdown(self, file_path: str) -> str:
         from unstructured.partition.auto import partition  # type: ignore
-        from app.workers.ingest_worker import _markdown_to_items
 
         strategy = self.get_option("strategy", "auto")
         languages = self.get_option("languages", "eng,chi_sim")
@@ -130,8 +215,7 @@ class UnstructuredParser(BaseDocumentParser):
                 lines.append(f"# {text}")
             else:
                 lines.append(text)
-        markdown = "\n\n".join(lines).strip()
-        return _markdown_to_items(markdown) if markdown else []
+        return "\n\n".join(lines).strip()
 
 
 class MinerUParser(BaseDocumentParser):
@@ -142,7 +226,7 @@ class MinerUParser(BaseDocumentParser):
         ParserParameter("extra_args", "额外参数", "text", ""),
     )
 
-    def parse(self, file_path: str) -> ParsedItems:
+    def to_markdown(self, file_path: str) -> str:
         """
         MinerU adapter via external command.
         Configure in config.json:
@@ -150,26 +234,45 @@ class MinerUParser(BaseDocumentParser):
         The command should output a markdown file path on stdout OR write
         <input_stem>.md under the provided temp output directory.
         """
-        from app.workers.ingest_worker import _markdown_to_items
-
         mineru_cmd = str(self.get_option("command", cfg.get("pdf.mineru_cmd", "mineru")))
         extra_args = str(self.get_option("extra_args", "") or "")
         with tempfile.TemporaryDirectory() as td:
             out_dir = Path(td)
-            cmd = shlex.split(mineru_cmd) + [
-                "--input",
-                file_path,
-                "--output",
-                str(out_dir),
-                "--format",
-                "markdown",
+            base_cmd = shlex.split(mineru_cmd, posix=(os.name != "nt"))
+            attempts = [
+                # MinerU 2.x CLI and safer defaults for constrained desktop envs.
+                base_cmd
+                + [
+                    "--path",
+                    file_path,
+                    "--output",
+                    str(out_dir),
+                    "--table",
+                    "false",
+                    "--formula",
+                    "false",
+                ],
+                base_cmd + ["--input", file_path, "--output", str(out_dir), "--format", "markdown"],
             ]
             if extra_args:
-                cmd.extend(shlex.split(extra_args))
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            if proc.returncode != 0:
-                detail = (proc.stderr or proc.stdout or "").strip()
-                raise RuntimeError(f"MinerU 执行失败: {detail or f'exit={proc.returncode}'}")
+                extra = shlex.split(extra_args, posix=(os.name != "nt"))
+                attempts = [cmd + extra for cmd in attempts]
+
+            last_detail = ""
+            for cmd in attempts:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                if proc.returncode == 0:
+                    last_detail = ""
+                    break
+                last_detail = (proc.stderr or proc.stdout or "").strip()
+            if last_detail:
+                raise RuntimeError(f"MinerU 执行失败: {last_detail or f'exit={proc.returncode}'}")
 
             md_path: Path | None = None
             stdout = (proc.stdout or "").strip()
@@ -187,8 +290,7 @@ class MinerUParser(BaseDocumentParser):
             if md_path is None or not md_path.exists():
                 raise RuntimeError("MinerU 未产出 markdown 文件，请检查 MinerU 命令参数")
 
-            markdown = md_path.read_text(encoding="utf-8", errors="replace")
-            return _markdown_to_items(markdown) if markdown.strip() else []
+            return md_path.read_text(encoding="utf-8", errors="replace")
 
 
 class OcrParser(BaseDocumentParser):
@@ -199,7 +301,7 @@ class OcrParser(BaseDocumentParser):
         ParserParameter("scale", "渲染倍率", "int", 2, minimum=1, maximum=4, step=1),
     )
 
-    def parse(self, file_path: str) -> ParsedItems:
+    def to_markdown(self, file_path: str) -> str:
         results = []
         try:
             import fitz  # type: ignore
@@ -214,10 +316,10 @@ class OcrParser(BaseDocumentParser):
                 image = Image.open(BytesIO(pix.tobytes("png")))
                 text = pytesseract.image_to_string(image, lang=lang)
                 if text.strip():
-                    results.append((text.strip(), page.number + 1, [], ""))
+                    results.append(f"<!-- page: {page.number + 1} -->\n\n{text.strip()}")
         except Exception as e:
             raise RuntimeError(f"OCR 解析失败: {e}") from e
-        return results
+        return "\n\n".join(results)
 
 
 PARSER_REGISTRY: Dict[str, BaseDocumentParser] = {

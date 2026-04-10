@@ -36,6 +36,7 @@ from app.utils.logger import logger
 
 class VideoWorkbench(QWidget):
     clip_created = pyqtSignal(dict)  # emitted after a clip is saved
+    clips_loaded = pyqtSignal(list)  # emitted when an existing video's clips are loaded
 
     def __init__(
         self,
@@ -140,6 +141,15 @@ class VideoWorkbench(QWidget):
         if probed_duration > 0:
             self._duration_sec = probed_duration
             self._timeline.set_duration(self._duration_sec)
+        self._load_existing_clips()
+
+    def _load_existing_clips(self) -> None:
+        if not self._video_path:
+            self.clips_loaded.emit([])
+            return
+        clips = SQLiteStore().get_clips_by_video(Path(self._video_path).name)
+        self._clip_list_label.setText(f"已标记片段：{len(clips)} 个")
+        self.clips_loaded.emit(clips)
 
     # ------------------------------------------------------------------
     # ASR signal handlers
@@ -282,6 +292,7 @@ class VideoWorkbench(QWidget):
         # Emit for parent to refresh combo boxes
         self.clip_created.emit({
             "id": clip_id,
+            "video_file": Path(self._video_path).name if self._video_path else "",
             "start": self._mark_in,
             "end": self._mark_out,
             "summary": summary,

@@ -26,7 +26,8 @@
   "chunking": {
     "max_chars": 1800,
     "overlap_chars": 240,
-    "keep_heading_path": true
+    "keep_heading_path": true,
+    "min_section_chars": 80
   },
   "pdf": {
     "parser_order": [
@@ -36,13 +37,12 @@
       "marker",
       "ocr"
     ],
-    "marker_device": "cpu",
+    "marker_device": "cuda",
     "mineru_cmd": "mineru",
     "index_on_import": false,
     "ocr_lang": "chi_sim+eng",
     "parser_options": {
-      "docling": {
-      },
+      "docling": {},
       "unstructured": {
         "strategy": "auto",
         "languages": "eng,chi_sim"
@@ -52,7 +52,7 @@
         "extra_args": ""
       },
       "marker": {
-        "device": "cpu"
+        "device": "cuda"
       },
       "ocr": {
         "lang": "chi_sim+eng",

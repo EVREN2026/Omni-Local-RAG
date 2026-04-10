@@ -115,6 +115,8 @@ class _SyncWorker(QThread):
 class DataflowPanel(QWidget):
     """Three-layer data flow visualisation and control panel."""
 
+    chunks_loaded = pyqtSignal(list)
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._current_json_path: Optional[str] = None
@@ -362,6 +364,8 @@ class DataflowPanel(QWidget):
         self._current_chunks = data.get("chunks", [])
         self._json_path_edit.setText(path)
         self._populate_chunk_table(self._current_chunks)
+        source_file = data.get("source_file") or Path(path).name
+        self.chunks_loaded.emit(_chunks_with_source_file(self._current_chunks, source_file))
         self._log(
             f"已加载 {len(self._current_chunks)} 条 chunk — {Path(path).name}"
         )
@@ -574,3 +578,15 @@ class DataflowPanel(QWidget):
     def _log(self, msg: str) -> None:
         self._log_label.setText(msg)
         logger.info(f"DataflowPanel: {msg}")
+
+
+def _chunks_with_source_file(chunks: list, source_file: Optional[str]) -> list:
+    source_name = Path(source_file).name if source_file else ""
+    rows = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        row = dict(chunk)
+        row.setdefault("source_file", source_name)
+        rows.append(row)
+    return rows

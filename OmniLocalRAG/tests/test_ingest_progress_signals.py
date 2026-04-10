@@ -5,16 +5,18 @@ Runs without PyQt5 installed by stubbing Qt classes before importing the worker.
 Verifies:
   stage_changed(str)         — emitted at least once; last emission contains "完成"
   page_progress(int, int)    — (0, total) at start, (total, total) at end
-  parse_done(str, int)       — parser name + block count on success
-  progress(int, int)         — emitted per chunk; last current == total
-  degraded_mode(str, str, str) — 3-arg signal when first parser falls back
+  parse_done(str, int)       — parser name + markdown output count on success
+  progress(int, int)         — emitted when file conversion finishes
+  degraded_mode(str, str, str) — 3-arg signal kept for compatibility
   finished(bool)             — True on success, False on empty parse
 """
 
 import importlib
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -122,13 +124,13 @@ class TestStageChangedSignal(unittest.TestCase):
         worker.stage_changed.connect(stage_rec)
         worker.finished.connect(finished_rec)
 
-        fake_embed = _make_fake_embed()
-        fake_chroma = MagicMock()
+        markdown = "\n\n".join(item[0] for item in parsed_items)
+        fake_md_path = MagicMock()
+        fake_md_path.exists.return_value = bool(markdown.strip())
+        fake_md_path.read_text.return_value = markdown
+        fake_md_path.name = "doc.converted.md"
 
-        with patch.object(mod, "EmbedManager", return_value=fake_embed), \
-             patch.object(mod, "ChromaStore", return_value=fake_chroma), \
-             patch.object(worker, "_parse_pdf_with_signals", return_value=parsed_items), \
-             patch("app.models.metadata_exporter.MetadataExporter"):
+        with patch.object(worker, "_convert_file_to_markdown", return_value=fake_md_path):
             worker._ingest_pdf()
 
         return stage_rec, finished_rec
@@ -144,11 +146,11 @@ class TestStageChangedSignal(unittest.TestCase):
         last = stage_rec.calls[-1][0]
         self.assertIn("完成", last)
 
-    def test_stage_changed_mentions_chunking(self):
+    def test_stage_changed_mentions_conversion(self):
         items = [("word " * 20, 1, [], "")]
         stage_rec, _ = self._run_ingest(items)
         texts = [c[0] for c in stage_rec.calls]
-        self.assertTrue(any("切块" in t or "向量" in t for t in texts))
+        self.assertTrue(any("转换" in t for t in texts))
 
     def test_finished_true_on_success(self):
         items = [("word " * 20, 1, [], "")]
@@ -162,7 +164,11 @@ class TestStageChangedSignal(unittest.TestCase):
         error_rec = SignalRecorder()
         worker.finished.connect(finished_rec)
         worker.error_occurred.connect(error_rec)
-        with patch.object(worker, "_parse_pdf_with_signals", return_value=[]):
+        fake_md_path = MagicMock()
+        fake_md_path.exists.return_value = True
+        fake_md_path.read_text.return_value = ""
+        fake_md_path.name = "doc.converted.md"
+        with patch.object(worker, "_convert_file_to_markdown", return_value=fake_md_path):
             worker._ingest_pdf()
         self.assertFalse(finished_rec.calls[0][0])
         self.assertGreater(error_rec.count, 0)
@@ -175,21 +181,22 @@ class TestProgressSignal(unittest.TestCase):
         progress_rec = SignalRecorder()
         worker.progress.connect(progress_rec)
 
-        fake_embed = _make_fake_embed()
-        fake_chroma = MagicMock()
+        markdown = "\n\n".join(item[0] for item in parsed_items)
+        fake_md_path = MagicMock()
+        fake_md_path.exists.return_value = bool(markdown.strip())
+        fake_md_path.read_text.return_value = markdown
+        fake_md_path.name = "doc.converted.md"
 
-        with patch.object(mod, "EmbedManager", return_value=fake_embed), \
-             patch.object(mod, "ChromaStore", return_value=fake_chroma), \
-             patch.object(worker, "_parse_pdf_with_signals", return_value=parsed_items), \
-             patch("app.models.metadata_exporter.MetadataExporter"):
+        with patch.object(worker, "_convert_file_to_markdown", return_value=fake_md_path):
             worker._ingest_pdf()
 
         return progress_rec
 
-    def test_progress_emitted_per_chunk(self):
+    def test_progress_emitted_when_conversion_finishes(self):
         items = [("word " * 20, 1, [], ""), ("other " * 20, 2, [], "")]
         rec = self._run_ingest(items)
-        self.assertGreaterEqual(rec.count, 2)
+        self.assertEqual(rec.count, 1)
+        self.assertEqual(rec.calls[0], (1, 1))
 
     def test_progress_final_current_equals_total(self):
         items = [("word " * 20, 1, [], "")]
@@ -225,6 +232,9 @@ class TestParseWithSignals(unittest.TestCase):
         fake_fitz_module = MagicMock()
         fake_fitz_module.open.return_value = fake_fitz_doc
 
+        temp_dir = tempfile.TemporaryDirectory()
+        md_path = Path(temp_dir.name) / "doc.converted.md"
+
         # Patch parser registry entries on the module
         def _factory(name):
             res = parser_results.get(name, [])
@@ -232,20 +242,28 @@ class TestParseWithSignals(unittest.TestCase):
                 def _raise(*a, **k):
                     raise res
                 return _raise
-            return lambda path: res
+            if isinstance(res, str):
+                markdown = res
+            else:
+                markdown = "\n\n".join(item[0] for item in res)
+            return lambda path: markdown
 
-        with patch.dict("sys.modules", {"fitz": fake_fitz_module}):
-            fake_registry = {}
-            for name in ("docling", "unstructured", "mineru", "marker", "ocr"):
-                parser = MagicMock()
-                parser.parse.side_effect = _factory(name)
-                fake_registry[name] = parser
-            with patch.object(mod, "PARSER_REGISTRY", fake_registry):
-                if parser_order is not None:
-                    with patch.object(mod, "_pdf_parser_order", return_value=parser_order):
+        try:
+            with patch.dict("sys.modules", {"fitz": fake_fitz_module}):
+                fake_registry = {}
+                for name in ("docling", "unstructured", "mineru", "marker", "ocr"):
+                    parser = MagicMock()
+                    parser.to_markdown.side_effect = _factory(name)
+                    fake_registry[name] = parser
+                with patch.object(mod, "_converted_markdown_path", return_value=md_path), \
+                     patch.object(mod, "PARSER_REGISTRY", fake_registry):
+                    if parser_order is not None:
+                        with patch.object(mod, "_pdf_parser_order", return_value=parser_order):
+                            result = worker._parse_pdf_with_signals("/fake/doc.pdf")
+                    else:
                         result = worker._parse_pdf_with_signals("/fake/doc.pdf")
-                else:
-                    result = worker._parse_pdf_with_signals("/fake/doc.pdf")
+        finally:
+            temp_dir.cleanup()
 
         return result, stage_rec, page_rec, parse_done_rec, degraded_rec
 
@@ -273,7 +291,7 @@ class TestParseWithSignals(unittest.TestCase):
         self.assertEqual(parse_done_rec.count, 1)
         parser_name, num_blocks = parse_done_rec.calls[0]
         self.assertEqual(parser_name, "docling")
-        self.assertEqual(num_blocks, 2)
+        self.assertEqual(num_blocks, 1)
 
     def test_degraded_mode_emitted_on_fallback(self):
         # New behavior: no auto fallback/downgrade.
@@ -293,7 +311,9 @@ class TestParseWithSignals(unittest.TestCase):
     def test_returns_empty_when_all_fail(self):
         worker, mod = _fresh_worker()
         with patch.object(mod, "_pdf_parser_order", return_value=["docling"]):
-            with patch.object(mod, "PARSER_REGISTRY", {"docling": MagicMock(parse=MagicMock(side_effect=Exception("x")))}):
+            parser = MagicMock()
+            parser.to_markdown.side_effect = Exception("x")
+            with patch.object(mod, "PARSER_REGISTRY", {"docling": parser}):
                 with self.assertRaises(Exception):
                     worker._parse_pdf_with_signals("/fake/doc.pdf")
 

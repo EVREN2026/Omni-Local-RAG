@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "timestamp": "20260410-220742",
+    "file_count": 1,
+    "files": [
+      "C:\\Users\\Windows10\\Desktop\\refactor-demo\\data\\SOP\\弹窗节点.pdf"
+    ],
+    "parsers": [
+      "docling"
+    ],
+    "warmup": 1,
+    "repeat": 1,
+    "script": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\OmniLocalRAG\\scripts\\test_document_parsers.py"
+  },
+  "summary": {
+    "docling": {
+      "total": 1,
+      "ok_count": 1,
+      "success_rate": 100.0,
+      "avg_time": 0.645,
+      "p50_time": 0.645,
+      "p95_time": 0.645,
+      "min_time": 0.645,
+      "max_time": 0.645,
+      "avg_blocks": 1
+    }
+  },
+  "rows": [
+    {
+      "parser": "docling",
+      "run_index": 1,
+      "is_warmup": true,
+      "ok": true,
+      "seconds": 5.775,
+      "block_count": 1,
+      "error": "",
+      "file": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\data\\SOP\\弹窗节点.pdf"
+    },
+    {
+      "parser": "docling",
+      "run_index": 2,
+      "is_warmup": false,
+      "ok": true,
+      "seconds": 0.645,
+      "block_count": 1,
+      "error": "",
+      "file": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\data\\SOP\\弹窗节点.pdf"
+    }
+  ]
+}

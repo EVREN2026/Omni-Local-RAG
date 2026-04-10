@@ -286,7 +286,7 @@ from app.utils import config as cfg
 # Force reload so it picks up stubs
 sys.modules.pop("app.views.pdf_import_panel", None)
 import app.views.pdf_import_panel as _panel_mod
-from app.views.pdf_import_panel import PdfImportPanel, _slider_spin_row
+from app.views.pdf_import_panel import PdfImportPanel
 
 
 # ---------------------------------------------------------------------------
@@ -321,11 +321,6 @@ class TestPdfImportPanelConfigRoundtrip(unittest.TestCase):
                         "start_page": 2,
                         "end_page": 10,
                     },
-                    "chunking": {
-                        "max_chars": 1200,
-                        "overlap_chars": 100,
-                        "keep_heading_path": False,
-                    },
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -349,18 +344,6 @@ class TestPdfImportPanelConfigRoundtrip(unittest.TestCase):
         panel = self._make_panel()
         items = [panel._parser_list.item(i).text() for i in range(panel._parser_list.count())]
         self.assertEqual(items[:5], ["docling", "unstructured", "mineru", "marker", "ocr"])
-
-    def test_load_from_config_chunking_max_chars(self):
-        panel = self._make_panel()
-        self.assertEqual(panel._max_chars_spin.value(), 1200)
-
-    def test_load_from_config_chunking_overlap(self):
-        panel = self._make_panel()
-        self.assertEqual(panel._overlap_chars_spin.value(), 100)
-
-    def test_load_from_config_keep_heading_false(self):
-        panel = self._make_panel()
-        self.assertFalse(panel._keep_heading_cb.isChecked())
 
     def test_load_from_config_page_range(self):
         panel = self._make_panel()
@@ -397,27 +380,6 @@ class TestPdfImportPanelConfigRoundtrip(unittest.TestCase):
         saved = json.loads(cfg._CONFIG_PATH.read_text(encoding="utf-8"))
         self.assertEqual(saved["pdf"]["parser_order"][0], "unstructured")
         self.assertEqual(saved["pdf"]["parser_order"][1], "docling")
-
-    def test_save_to_config_writes_max_chars(self):
-        panel = self._make_panel()
-        panel._max_chars_spin.setValue(2400)
-        panel._save_to_config()
-        saved = json.loads(cfg._CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(saved["chunking"]["max_chars"], 2400)
-
-    def test_save_to_config_writes_overlap(self):
-        panel = self._make_panel()
-        panel._overlap_chars_spin.setValue(300)
-        panel._save_to_config()
-        saved = json.loads(cfg._CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(saved["chunking"]["overlap_chars"], 300)
-
-    def test_save_to_config_writes_keep_heading(self):
-        panel = self._make_panel()
-        panel._keep_heading_cb.setChecked(True)
-        panel._save_to_config()
-        saved = json.loads(cfg._CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertTrue(saved["chunking"]["keep_heading_path"])
 
     def test_save_to_config_invalidates_cache(self):
         panel = self._make_panel()

@@ -2,3 +2,6 @@ node_modules/
 __pycache__/
 *.pyc
 .codex/
+*.whl
+wheels/*.whl
+tools/mineru-venv/

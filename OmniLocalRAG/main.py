@@ -31,10 +31,28 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
 
-# 关键：强制将 venv 的 DLL 路径放到最前面，防止系统去 C:\Python3 找旧版 DLL
-venv_path = os.path.join(os.getcwd(), "venv", "Lib", "site-packages", "torch", "lib")
-if os.path.exists(venv_path):
+# Only add the local venv torch DLL directory when this process is actually
+# running inside that venv. Mixing global Python packages with venv DLLs can
+# make torch fail with native DLL errors such as WinError 1114.
+project_root = os.path.dirname(os.path.abspath(__file__))
+venv_root = os.path.abspath(os.path.join(project_root, "venv"))
+active_prefix = os.path.abspath(sys.prefix)
+venv_path = os.path.join(venv_root, "Lib", "site-packages", "torch", "lib")
+try:
+    running_in_local_venv = os.path.commonpath([active_prefix, venv_root]) == venv_root
+except ValueError:
+    running_in_local_venv = False
+if running_in_local_venv and os.path.exists(venv_path):
     os.add_dll_directory(venv_path)
+
+# On Windows, importing PyQt5 before torch can make torch fail later while
+# loading native DLLs (c10.dll / WinError 1114). Preloading torch here only
+# initializes its runtime; the BGE-M3 model still loads lazily on first use.
+try:
+    import torch  # type: ignore  # noqa: F401
+except Exception:
+    # EmbedManager will surface the actionable error when embeddings are needed.
+    pass
 
 # faulthandler prints a native backtrace on segfault / DLL abort
 faulthandler.enable()

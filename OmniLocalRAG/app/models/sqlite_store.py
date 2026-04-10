@@ -144,6 +144,19 @@ class SQLiteStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_clips(self, video_file: str = "") -> List[Dict]:
+        with self._conn() as conn:
+            if video_file:
+                rows = conn.execute(
+                    "SELECT * FROM video_clips WHERE video_file=? ORDER BY video_file,start_sec",
+                    (video_file,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM video_clips ORDER BY video_file,start_sec,created_at"
+                ).fetchall()
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # cross_modal_map
     # ------------------------------------------------------------------
@@ -154,8 +167,14 @@ class SQLiteStore:
         pdf_anchor_id: str,
         note: str = "",
     ) -> str:
-        mid = str(uuid.uuid4())
         with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM cross_modal_map WHERE video_clip_id=? AND pdf_anchor_id=? LIMIT 1",
+                (video_clip_id, pdf_anchor_id),
+            ).fetchone()
+            if existing:
+                return str(existing["id"])
+            mid = str(uuid.uuid4())
             conn.execute(
                 "INSERT INTO cross_modal_map (id,video_clip_id,pdf_anchor_id,note) VALUES (?,?,?,?)",
                 (mid, video_clip_id, pdf_anchor_id, note),
@@ -169,6 +188,36 @@ class SQLiteStore:
                 (video_clip_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def list_cross_modal(self) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT
+                       m.id,
+                       m.video_clip_id,
+                       m.pdf_anchor_id,
+                       m.note,
+                       m.created_at,
+                       c.video_file,
+                       c.start_sec,
+                       c.end_sec,
+                       c.semantic_summary
+                   FROM cross_modal_map m
+                   LEFT JOIN video_clips c ON c.id = m.video_clip_id
+                   ORDER BY m.created_at DESC"""
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_cross_modal_anchor(self, map_id: str, pdf_anchor_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE cross_modal_map SET pdf_anchor_id=? WHERE id=?",
+                (pdf_anchor_id, map_id),
+            )
+
+    def delete_cross_modal(self, map_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM cross_modal_map WHERE id=?", (map_id,))
 
     # ------------------------------------------------------------------
     # app_config

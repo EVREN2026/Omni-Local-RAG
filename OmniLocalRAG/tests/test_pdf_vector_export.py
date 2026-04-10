@@ -87,30 +87,62 @@ class PdfVectorExportTest(unittest.TestCase):
         self.cfg._cache = self.old_cache
         self.temp_dir.cleanup()
 
-    def test_pdf_chunks_are_converted_and_exported_without_vectorization(self):
+    def test_pdf_file_is_converted_to_markdown_without_chunking_or_vectorization(self):
         source_file = str(Path(self.temp_dir.name) / "sample.pdf")
-        long_text = " ".join(f"word{i}" for i in range(700))
-        parsed_items = [(long_text, 1, [[0, 0, 10, 10]], "")]
+        markdown = "# Sample\n\nConverted markdown body."
+        fake_parser = types.SimpleNamespace(to_markdown=lambda path: markdown)
 
-        with patch.object(self.ingest_worker.IngestWorker, "_parse_pdf_with_signals", return_value=parsed_items) as parse_pdf:
+        with patch.object(self.ingest_worker, "PARSER_REGISTRY", {"docling": fake_parser}), \
+             patch.object(self.ingest_worker, "_pdf_parser_order", return_value=["docling"]):
             worker = self.ingest_worker.IngestWorker(source_file)
             worker._ingest_pdf()
 
-        parse_pdf.assert_called_once_with(source_file)
         self.assertEqual(len(FakeChromaStore.add_calls), 0)
         self.assertEqual(len(FakeEmbedManager.encode_calls), 0)
 
+        converted_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.converted.md"
         json_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.json"
         md_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.md"
-        self.assertTrue(json_path.exists())
+        self.assertTrue(converted_path.exists())
+        self.assertEqual(converted_path.read_text(encoding="utf-8"), markdown)
+        self.assertFalse(json_path.exists())
+        self.assertFalse(md_path.exists())
+
+    def test_chunk_exporter_still_writes_review_files_for_manual_chunking(self):
+        source_file = str(Path(self.temp_dir.name) / "sample.pdf")
+        chunk_id = "chunk-1"
+        from app.models.metadata_exporter import MetadataExporter
+
+        MetadataExporter().export_chunks(
+            source_file=source_file,
+            source_type="pdf",
+            chunks=[
+                {
+                    "chunk_id": chunk_id,
+                    "anchor_id": chunk_id,
+                    "source_type": "pdf",
+                    "page": 1,
+                    "coords": [],
+                    "heading_path": "Sample",
+                    "block_type": "text",
+                    "content": "chunk content",
+                    "vector_dim": None,
+                    "stored": False,
+                    "is_manual": False,
+                }
+            ],
+        )
+
+        json_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.json"
+        md_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.md"
         self.assertTrue(md_path.exists())
 
         payload = json.loads(json_path.read_text(encoding="utf-8"))
         self.assertEqual(payload["source_file"], "sample.pdf")
-        self.assertGreater(payload["chunk_count"], 0)
+        self.assertEqual(payload["chunk_count"], 1)
         for chunk in payload["chunks"]:
-            self.assertTrue(chunk["chunk_id"])
-            self.assertTrue(chunk["anchor_id"])
+            self.assertEqual(chunk["chunk_id"], chunk_id)
+            self.assertEqual(chunk["anchor_id"], chunk_id)
             self.assertIn("content", chunk)
             self.assertIsNone(chunk["vector_dim"])
             self.assertFalse(chunk["stored"])
