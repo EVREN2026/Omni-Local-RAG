@@ -83,6 +83,7 @@ class KnowledgeEditor(QMainWindow):
         self._chunk_bench = ChunkWorkbench(self)
         self._video_bench = VideoWorkbench(self._ingest, self)
         self._dataflow_panel = DataflowPanel(self)
+        self._dataflow_panel.set_search_controller(self._search)   # Phase 2-3: cache invalidation
         self._cross_modal_panel = CrossModalPanel(self)
         self._api_settings_panel = ApiSettingsPanel(self)
 

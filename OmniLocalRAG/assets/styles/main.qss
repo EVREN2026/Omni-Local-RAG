@@ -71,6 +71,13 @@ QWidget {
     color: #dbe5ef;
     font-size: 14px;
     line-height: 1.6;
+    min-height: 80px;
+    max-height: 400px;
+}
+
+/* QTextBrowser inherits QTextEdit rules; make scrollbar always visible */
+#AnswerArea QScrollBar:vertical {
+    width: 8px;
 }
 
 /* ── Cards scroll area ───────────────────────────────────── */

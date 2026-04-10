@@ -1,7 +1,7 @@
 from typing import Optional
 
-from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer
-from PyQt5.QtGui import QKeyEvent
+from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, QUrl
+from PyQt5.QtGui import QKeyEvent, QTextDocument
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -54,7 +55,8 @@ class SpotlightWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, False)
 
-        width = cfg.get("ui.window_width", 680)
+        # Use configured width but enforce a comfortable minimum for rich content
+        width = max(cfg.get("ui.window_width", 800), 800)
         self.setFixedWidth(width)
         self.setMinimumHeight(60)
 
@@ -92,13 +94,17 @@ class SpotlightWindow(QWidget):
         input_row.addWidget(self._stop_btn)
         layout.addLayout(input_row)
 
-        # --- Answer area ---
-        self._answer = QTextEdit()
+        # --- Answer area (QTextBrowser for rich HTML / table / image support) ---
+        self._answer = QTextBrowser()
         self._answer.setObjectName("AnswerArea")
         self._answer.setReadOnly(True)
         self._answer.setMinimumHeight(0)
         self._answer.setMaximumHeight(0)
         self._answer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._answer.setOpenExternalLinks(True)
+        self._answer.setOpenLinks(False)          # handle internally
+        # Track raw answer text for cursor-blink manipulation
+        self._answer_plain: str = ""
         layout.addWidget(self._answer)
 
         # --- Cards scroll area ---
@@ -191,8 +197,9 @@ class SpotlightWindow(QWidget):
         query = self._input.text().strip()
         if not query:
             return
+        self._answer_plain = ""
         self._answer.clear()
-        self._answer.setMaximumHeight(200)
+        self._answer.setMaximumHeight(300)
         self._clear_cards()
         self._stop_btn.show()
         self._cursor_timer.start()
@@ -200,31 +207,27 @@ class SpotlightWindow(QWidget):
         MemoryWatcher().reset()
 
     def _on_token(self, token: str) -> None:
-        cursor = self._answer.textCursor()
-        # Remove trailing cursor char before appending
-        text = self._answer.toPlainText()
-        if text.endswith("▋"):
-            cursor.deletePreviousChar()
-        cursor.insertText(token)
-        cursor.insertText("▋")
-        self._answer.setTextCursor(cursor)
-        self._answer.ensureCursorVisible()
+        """Append a streaming token to the answer area (plain text accumulator)."""
+        self._answer_plain += token
+        # Render as plain text with trailing cursor indicator
+        self._answer.setPlainText(self._answer_plain + "▋")
+        self._answer.verticalScrollBar().setValue(
+            self._answer.verticalScrollBar().maximum()
+        )
 
     def _blink_cursor(self) -> None:
         text = self._answer.toPlainText()
-        cursor = self._answer.textCursor()
         if text.endswith("▋"):
-            cursor.deletePreviousChar()
+            self._answer.setPlainText(text[:-1])
         else:
-            cursor.insertText("▋")
-        self._answer.setTextCursor(cursor)
+            self._answer.setPlainText(text + "▋")
 
     def _on_context(self, results: list) -> None:
         from app.views.result_cards import build_card
         self._clear_cards()
         if not results:
             return
-        self._cards_scroll.setMaximumHeight(320)
+        self._cards_scroll.setMaximumHeight(340)
         for r in results:
             card = build_card(r, parent=self._cards_widget)
             if card:
@@ -233,16 +236,27 @@ class SpotlightWindow(QWidget):
 
     def _on_finished(self, success: bool) -> None:
         self._cursor_timer.stop()
-        text = self._answer.toPlainText()
-        if text.endswith("▋"):
-            cursor = self._answer.textCursor()
-            cursor.deletePreviousChar()
-            self._answer.setTextCursor(cursor)
+        # Strip trailing cursor char
+        plain = self._answer.toPlainText()
+        if plain.endswith("▋"):
+            plain = plain[:-1]
+        self._answer_plain = plain
+
+        # If the content contains HTML tags (tables, images) render as rich HTML
+        if _contains_html(plain):
+            html = _plain_to_html(plain)
+            self._answer.setHtml(html)
+        else:
+            self._answer.setPlainText(plain)
+
+        self._answer.verticalScrollBar().setValue(0)
         self._stop_btn.hide()
 
     def _on_error(self, msg: str) -> None:
-        self._on_finished(False)
-        self._answer.setPlainText(f"[错误] {msg}")
+        self._cursor_timer.stop()
+        self._answer_plain = f"[错误] {msg}"
+        self._answer.setPlainText(self._answer_plain)
+        self._stop_btn.hide()
 
     def _clear_cards(self) -> None:
         while self._cards_layout.count() > 1:
@@ -292,3 +306,74 @@ class SpotlightWindow(QWidget):
     def closeEvent(self, event) -> None:
         event.ignore()
         self.hide_window()
+
+
+# ---------------------------------------------------------------------------
+# HTML detection & conversion helpers
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _contains_html(text: str) -> bool:
+    """Return True if text has any HTML tags (tables, images, etc.)."""
+    return bool(_re.search(r"<(table|img|figure|div|p|ul|ol|li|br)[^>]*>", text, _re.IGNORECASE))
+
+
+def _plain_to_html(text: str) -> str:
+    """
+    Wrap plain text that already contains HTML fragments in a styled document.
+    Lines that are NOT HTML tags are converted to paragraphs; HTML blocks pass
+    through unchanged.  Images gain a max-width style so they fit the window.
+    """
+    # Inject responsive image sizing and a table style
+    style = """
+    <style>
+      body { font-family: 'Microsoft YaHei UI', sans-serif; font-size: 14px;
+             color: #dbe5ef; line-height: 1.65; }
+      img  { max-width: 100%; height: auto; border-radius: 6px;
+             margin: 6px 0; display: block; }
+      table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+      th, td { border: 1px solid rgba(255,255,255,22); padding: 5px 10px;
+               text-align: left; }
+      th { background: rgba(124,211,183,18); color: #8fd9c2; font-weight: 600; }
+      tr:nth-child(even) { background: rgba(255,255,255,5); }
+      a { color: #7cd3b7; }
+      p { margin: 4px 0; }
+    </style>
+    """
+    # Convert [图片] placeholder to a grey box label
+    text = _re.sub(r"\[图片\]", '<span style="color:#8fa3b6;">[图片]</span>', text)
+
+    # Split into lines; wrap non-HTML lines in <p>, leave HTML lines raw
+    lines = text.split("\n")
+    parts: list = []
+    html_block = False
+    buf: list = []
+
+    def flush_buf():
+        if buf:
+            parts.append("<p>" + " ".join(buf) + "</p>")
+            buf.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            flush_buf()
+            continue
+        # Detect HTML block start/end
+        if _re.match(r"<(table|img|figure|div|ul|ol)", stripped, _re.IGNORECASE):
+            flush_buf()
+            html_block = True
+        if html_block:
+            parts.append(line)
+            if _re.search(r"</(table|figure|div|ul|ol)>", stripped, _re.IGNORECASE):
+                html_block = False
+        else:
+            # Plain text line — accumulate for paragraph
+            buf.append(stripped)
+
+    flush_buf()
+
+    body = "\n".join(parts)
+    return f"<html><head>{style}</head><body>{body}</body></html>"

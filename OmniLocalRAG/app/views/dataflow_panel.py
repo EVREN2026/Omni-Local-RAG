@@ -124,8 +124,14 @@ class DataflowPanel(QWidget):
         self._convert_worker: Optional[_ConvertWorker] = None
         self._sync_worker: Optional[_SyncWorker] = None
         self._api_worker = None
+        # Optional reference to SearchController for cache invalidation after edits
+        self._search_ctrl = None
         self._build()
         self._refresh_file_list()
+
+    def set_search_controller(self, ctrl) -> None:
+        """Inject a SearchController so edits auto-invalidate the search cache."""
+        self._search_ctrl = ctrl
 
     # ------------------------------------------------------------------
     # Build
@@ -403,6 +409,7 @@ class DataflowPanel(QWidget):
         new_content = self._chunk_editor.toPlainText().strip()
         if not new_content:
             return
+        chunk_id = self._current_chunks[row].get("id", "")
         self._current_chunks[row]["content"] = new_content
         self._current_chunks[row]["is_manual"] = True
         # Update table preview
@@ -412,6 +419,9 @@ class DataflowPanel(QWidget):
         if self._current_json_path:
             self._write_current_json()
             self._log(f"Chunk #{row + 1} 已修改并保存（is_manual=true）")
+        # Invalidate search cache so next search fetches updated content
+        if chunk_id and self._search_ctrl:
+            self._search_ctrl.invalidate_cache(chunk_id)
 
     def _write_current_json(self) -> None:
         if not self._current_json_path:

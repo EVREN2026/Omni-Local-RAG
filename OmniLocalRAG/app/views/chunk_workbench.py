@@ -30,7 +30,7 @@ from app.models.metadata_exporter import MetadataExporter
 from app.models.stable_ids import stable_chunk_id
 from app.utils import config as cfg
 from app.utils.logger import logger
-from app.workers.ingest_worker import _markdown_to_items
+from app.models.chunker import markdown_to_items as _markdown_to_items
 
 
 class ChunkWorkbench(QWidget):

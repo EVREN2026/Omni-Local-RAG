@@ -73,8 +73,9 @@ class TrayIcon(QSystemTrayIcon):
             self._spotlight.toggle()
 
     def _open_prefs(self) -> None:
-        from app.views.knowledge_editor import KnowledgeEditor
-        logger.info("Open preferences (stub)")
+        from app.views.preferences_dialog import PreferencesDialog
+        dlg = PreferencesDialog()
+        dlg.exec_()
 
     def _free_memory(self) -> None:
         from app.models.llm_manager import LLMManager

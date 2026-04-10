@@ -258,7 +258,58 @@ class PDFWorkbench(QWidget):
     # ------------------------------------------------------------------
 
     def _on_pdf_selection(self, rect: QRect) -> None:
-        return
+        """Map the rubber-band selection rect on the PDF label to text in the
+        Markdown editor and scroll to the nearest matching line.
+
+        Strategy:
+        1. Convert the pixel rect to PDF-coordinate space (points).
+        2. Ask PyMuPDF for words inside that bbox.
+        3. Build a search phrase from the found words.
+        4. Use QTextEdit.find() to locate and scroll to the phrase.
+        """
+        if not self._fitz_doc or not self._current_page < self._total_pages:
+            return
+        if rect.width() < 5 or rect.height() < 5:
+            return  # ignore accidental tiny clicks
+
+        try:
+            import fitz  # type: ignore
+            page = self._fitz_doc[self._current_page]
+            scale = self._effective_scale(page)
+            if scale <= 0:
+                return
+
+            # Convert pixel rect → PDF points
+            x0 = rect.left()   / scale
+            y0 = rect.top()    / scale
+            x1 = rect.right()  / scale
+            y1 = rect.bottom() / scale
+            bbox = fitz.Rect(x0, y0, x1, y1)
+
+            # Extract words inside the selection (each word: x0,y0,x1,y1,text,…)
+            words = page.get_text("words", clip=bbox)
+            if not words:
+                return
+
+            phrase = " ".join(w[4] for w in words[:12])   # at most 12 words for searching
+            if not phrase.strip():
+                return
+
+            # Scroll the Markdown editor to the first occurrence
+            # Reset cursor to top first so find() searches from the beginning
+            from PyQt5.QtGui import QTextCursor
+            self._md_editor.moveCursor(QTextCursor.Start)
+            found = self._md_editor.find(phrase)
+            if not found:
+                # Fallback: try with the first 3 words only
+                short = " ".join(phrase.split()[:3])
+                self._md_editor.moveCursor(QTextCursor.Start)
+                self._md_editor.find(short)
+            # Ensure the found position is scrolled into view
+            self._md_editor.ensureCursorVisible()
+
+        except Exception as e:
+            logger.debug(f"PDF selection mapping failed: {e}")
 
     def eventFilter(self, watched, event):
         if (

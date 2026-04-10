@@ -8,13 +8,28 @@ _CONFIG_PATH = _BASE / "config.json"
 _DEFAULT: dict = {
     "llm": {
         "enabled": True,
-        "subprocess": True,
-        "model_path": "models/gemma-2-2b-it-q4_k_m.gguf",
-        "n_gpu_layers": 0,
-        "n_ctx": 4096,
+        "model_path": "models/gemma-4-2b-it-q4_k_m.gguf",
+        "n_gpu_layers": 999,
+        "n_ctx": 8192,
         "max_tokens": 512,
         "temperature": 0.7,
         "repeat_penalty": 1.1,
+    },
+    "llama_server": {
+        # llama-server.exe 专用配置；留空则继承 llm.* 对应字段
+        "model_path":       "",                          # 独立指定时覆盖 llm.model_path
+        "server_dir":       "models/llama-b8747-bin-win-cuda-12.4-x64",
+        "host":             "127.0.0.1",
+        "port":             8000,
+        "n_gpu_layers":     999,
+        "ctx_size":         8192,
+        "threads":          -1,                          # -1 = llama-server 自动
+        "flash_attn":       True,
+        "no_mmap":          True,
+        "numa":             "distribute",
+        "extra_args":       "",
+        "auto_download":    True,                        # 找不到时从 GitHub 下载
+        "startup_timeout":  180,
     },
     "embed": {"model_path": "models/bge-m3", "device": "cpu"},
     "retrieval": {"top_k": 5, "distance_threshold": 0.7},
@@ -28,6 +43,7 @@ _DEFAULT: dict = {
         "max_chars": 1800,
         "overlap_chars": 240,
         "keep_heading_path": True,
+        "min_section_chars": 80,   # minimum body length for a section to be its own chunk
     },
     "pdf": {
         "parser_order": ["docling", "unstructured", "mineru", "marker", "ocr"],

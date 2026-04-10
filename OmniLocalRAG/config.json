@@ -1,17 +1,31 @@
 {
   "llm": {
     "enabled": true,
-    "subprocess": true,
-    "model_path": "models/gemma-2-2b-it-Q4_K_M.gguf",
-    "n_gpu_layers": 0,
-    "n_ctx": 4096,
+    "model_path": "models\\gemma-4-2b-it-q4_k_m.gguf",
+    "n_gpu_layers": 200,
+    "n_ctx": 8192,
     "max_tokens": 512,
     "temperature": 0.7,
     "repeat_penalty": 1.1
   },
+  "llama_server": {
+    "model_path": "models\\gemma-4-2b-it-q4_k_m.gguf",
+    "server_dir": "models\\llama-b8747-bin-win-cuda-12.4-x64",
+    "host": "127.0.0.1",
+    "port": 8000,
+    "n_gpu_layers": 999,
+    "ctx_size": 8192,
+    "threads": -1,
+    "flash_attn": true,
+    "no_mmap": true,
+    "numa": "distribute",
+    "extra_args": "",
+    "auto_download": true,
+    "startup_timeout": 180
+  },
   "embed": {
     "model_path": "models/bge-m3",
-    "device": "cpu"
+    "device": "cuda"
   },
   "retrieval": {
     "top_k": 5,

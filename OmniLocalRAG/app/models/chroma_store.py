@@ -198,3 +198,35 @@ class ChromaStore:
     def count(self) -> int:
         with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM vectors").fetchone()[0]
+
+    def list_by_source(self, source_name: str) -> List[Dict[str, Any]]:
+        """Return all vectors whose pdf_payload or video_payload references source_name.
+
+        Implements the interface expected by json_db_sync._fetch_db_chunks().
+        Uses a LIKE match on the JSON payload fields — sufficient for exact file names.
+        """
+        if not self._db_path:
+            return []
+        try:
+            pattern = f'%{source_name}%'
+            with self._conn() as conn:
+                rows = conn.execute(
+                    """SELECT * FROM vectors
+                       WHERE pdf_payload LIKE ?
+                          OR video_payload LIKE ?
+                          OR content LIKE ?""",
+                    (pattern, pattern, pattern),
+                ).fetchall()
+            results = []
+            for row in rows:
+                entry = dict(row)
+                try:
+                    entry["pdf_payload"]   = json.loads(entry.get("pdf_payload", "{}"))
+                    entry["video_payload"] = json.loads(entry.get("video_payload", "{}"))
+                except json.JSONDecodeError:
+                    pass
+                results.append(entry)
+            return results
+        except Exception as e:
+            logger.error(f"list_by_source({source_name}) failed: {e}", exc_info=True)
+            return []

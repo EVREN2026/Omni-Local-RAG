@@ -127,7 +127,7 @@ class InferenceWorker(QThread):
                 return
 
             if not llm.load():
-                detail = llm.last_error or "请检查 models/ 目录和 llama-cpp-python 安装"
+                detail = llm.last_error or "请检查 models/ 目录及 llama-server 配置"
                 answer = _build_retrieval_answer(
                     results,
                     f"本地 LLM 加载失败，已降级为检索结果直出。\n原因：{detail}",

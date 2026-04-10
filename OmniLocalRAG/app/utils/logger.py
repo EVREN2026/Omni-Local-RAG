@@ -13,10 +13,23 @@ def setup_logger() -> logging.Logger:
 
     logger.setLevel(logging.DEBUG)
 
+    # Read retention days from config if available (avoid circular import: use
+    # the raw JSON file directly so logger can be imported before config cache
+    # is populated).
+    backup_count = 30
+    try:
+        import json as _json
+        _config_path = Path(__file__).parent.parent.parent / "config.json"
+        if _config_path.exists():
+            _cfg = _json.loads(_config_path.read_text(encoding="utf-8"))
+            backup_count = int(_cfg.get("log_retention_days", 30))
+    except Exception:
+        pass
+
     handler = TimedRotatingFileHandler(
         filename=log_dir / "app.log",
         when="midnight",
-        backupCount=30,
+        backupCount=backup_count,
         encoding="utf-8",
     )
     handler.suffix = "%Y-%m-%d"

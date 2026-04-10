@@ -65,16 +65,16 @@ class PDFCard(QFrame):
         pdf_payload = self._data.get("pdf_payload") or {}
         file_name = pdf_payload.get("file", "")
         page = pdf_payload.get("page", "")
-        content = self._data.get("document", "")[:200]
+        content = self._data.get("document", "")[:400]
 
         title = QLabel(f"{file_name}  第 {page} 页")
         title.setObjectName("CardTitle")
-        title.setWordWrap(False)
+        title.setWordWrap(True)
 
         body = QLabel(content)
         body.setObjectName("CardBody")
         body.setWordWrap(True)
-        body.setMaximumHeight(60)
+        body.setMaximumHeight(80)
 
         info.addWidget(title)
         info.addWidget(body)
@@ -136,16 +136,17 @@ class VideoCard(QFrame):
         start = video_payload.get("start", 0)
         end = video_payload.get("end", 0)
         file_name = video_payload.get("file", "")
-        summary = self._data.get("document", "")[:200]
+        summary = self._data.get("document", "")[:400]
 
         ts = f"{_fmt_time(start)} - {_fmt_time(end)}"
         title = QLabel(f"{file_name}  [{ts}]")
         title.setObjectName("CardTitle")
+        title.setWordWrap(True)
 
         body = QLabel(summary)
         body.setObjectName("CardBody")
         body.setWordWrap(True)
-        body.setMaximumHeight(60)
+        body.setMaximumHeight(80)
 
         info.addWidget(title)
         info.addWidget(body)
