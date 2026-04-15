@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>StartupGuideDialog</class>
+ <widget class="QDialog" name="StartupGuideDialog">
+  <property name="windowTitle"><string>Omni-Local RAG - 首次启动引导</string></property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="spacing"><number>12</number></property>
+   <item><widget class="QLabel" name="introLabel"><property name="wordWrap"><bool>true</bool></property><property name="text"><string>&lt;b&gt;检测到以下必需文件缺失，请按提示补齐后重新启动程序。&lt;/b&gt;</string></property></widget></item>
+   <item>
+    <widget class="QScrollArea" name="itemsScrollArea">
+     <property name="widgetResizable"><bool>true</bool></property>
+     <widget class="QWidget" name="itemsHostWidget">
+      <layout class="QVBoxLayout" name="itemsLayout">
+       <property name="spacing"><number>10</number></property>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item><widget class="QLabel" name="hintLabel"><property name="wordWrap"><bool>true</bool></property><property name="text"><string>将模型文件放入 models/ 目录；数据目录会在首次运行时自动创建。</string></property></widget></item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonsLayout">
+     <item><spacer name="buttonsSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+     <item><widget class="QPushButton" name="closeButton"><property name="text"><string>关闭并退出</string></property></widget></item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>VideoWorkbench</class>
+ <widget class="QWidget" name="VideoWorkbench">
+  <layout class="QVBoxLayout" name="rootLayout">
+   <item><widget class="QLabel" name="statusLabel"><property name="text"><string>未加载视频</string></property></widget></item>
+   <item><widget class="QProgressBar" name="progressBar"><property name="visible"><bool>false</bool></property><property name="value"><number>0</number></property></widget></item>
+   <item><widget class="QWidget" name="timelineHostWidget"><layout class="QVBoxLayout" name="timelineHostLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+   <item><layout class="QHBoxLayout" name="controlsLayout"><item><widget class="QPushButton" name="playButton"><property name="text"><string>▶ 播放</string></property></widget></item><item><widget class="QPushButton" name="openExternalButton"><property name="text"><string>外部播放</string></property></widget></item><item><widget class="QLabel" name="positionLabel"><property name="text"><string>00:00</string></property></widget></item><item><widget class="QPushButton" name="markInButton"><property name="text"><string>[I] 标记开始</string></property></widget></item><item><widget class="QPushButton" name="markOutButton"><property name="text"><string>[O] 标记结束</string></property></widget></item><item><widget class="QPushButton" name="confirmClipButton"><property name="text"><string>→ 确认切片</string></property></widget></item><item><spacer name="controlsSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
+   <item><widget class="QLabel" name="markLabel"><property name="text"><string>In: --  Out: --</string></property></widget></item>
+   <item><widget class="QLabel" name="clipListLabel"><property name="text"><string>已标记片段：</string></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

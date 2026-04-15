@@ -2,20 +2,28 @@
   "llm": {
     "enabled": true,
     "model_path": "models\\gemma-4-2b-it-q4_k_m.gguf",
-    "n_gpu_layers": 200,
-    "n_ctx": 8192,
+    "n_gpu_layers": 0,
+    "n_ctx": 6144,
     "max_tokens": 512,
-    "temperature": 0.7,
-    "repeat_penalty": 1.1
+    "temperature": 0.55,
+    "repeat_penalty": 1.08,
+    "top_k": 30,
+    "top_p": 0.9,
+    "min_p": 0.05,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0
   },
   "llama_server": {
     "model_path": "models\\gemma-4-2b-it-q4_k_m.gguf",
-    "server_dir": "models\\llama-b8747-bin-win-cuda-12.4-x64",
+    "server_dir": "models\\llama-b8757-bin-win-cuda-13.1-x64",
     "host": "127.0.0.1",
     "port": 8000,
-    "n_gpu_layers": 999,
-    "ctx_size": 8192,
+    "n_gpu_layers": 0,
+    "ctx_size": 6144,
     "threads": -1,
+    "parallel": 2,
+    "batch_size": 1024,
+    "ubatch_size": 512,
     "flash_attn": true,
     "no_mmap": true,
     "numa": "distribute",
@@ -25,11 +33,18 @@
   },
   "embed": {
     "model_path": "models/bge-m3",
-    "device": "cuda"
+    "device": "cpu",
+    "backend": "auto",
+    "batch_size": 12,
+    "max_length": 8192,
+    "sparse_top_k": 96
   },
   "retrieval": {
     "top_k": 5,
-    "distance_threshold": 0.7
+    "distance_threshold": 0.72,
+    "mode": "hybrid",
+    "hybrid_dense_weight": 0.55,
+    "hybrid_sparse_weight": 0.45
   },
   "qa_memory": {
     "enabled": true,
@@ -41,7 +56,9 @@
     "max_chars": 1800,
     "overlap_chars": 240,
     "keep_heading_path": true,
-    "min_section_chars": 80
+    "min_section_chars": 80,
+    "micro_chunk_chars": 100,
+    "image_context_lines": 3
   },
   "pdf": {
     "parser_order": [
@@ -52,7 +69,7 @@
       "ocr"
     ],
     "marker_device": "cuda",
-    "mineru_cmd": "mineru",
+    "mineru_cmd": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\OmniLocalRAG\\tools\\mineru-venv\\Scripts\\mineru.exe",
     "index_on_import": false,
     "ocr_lang": "chi_sim+eng",
     "parser_options": {
@@ -62,7 +79,7 @@
         "languages": "eng,chi_sim"
       },
       "mineru": {
-        "command": "mineru",
+        "command": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\OmniLocalRAG\\tools\\mineru-venv\\Scripts\\mineru.exe",
         "extra_args": ""
       },
       "marker": {
@@ -87,7 +104,7 @@
   },
   "ui": {
     "hotkey": "alt+space",
-    "window_width": 680,
+    "window_width": 1040,
     "window_opacity": 0.95,
     "animation_ms": 80
   },

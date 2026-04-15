@@ -1,15 +1,15 @@
 # Omni-Local RAG Python dependencies
 #
 # Install through install.bat / install_cpu.bat / install_cuda.bat.
-# llama-cpp-python is intentionally NOT listed here: install scripts install
-# the local cp312 win_amd64 wheel:
-#   llama_cpp_python-0.3.19-cp312-cp312-win_amd64.whl
+# LLM inference is served by llama-server (external binary), not
+# llama-cpp-python Python bindings.
 
 # GUI
 PyQt5==5.15.10
 
 # Embeddings
-sentence-transformers==2.7.0
+sentence-transformers==5.4.0
+transformers==4.57.6
 
 # PDF parsing backends
 docling==1.0.0

@@ -226,6 +226,7 @@ def md_to_json(
         # Merge: human-editable fields overwrite base
         merged = {**base}
         merged["content"] = new_content
+        merged["display_content"] = new_content
         if parsed.get("notes"):
             merged["notes"] = parsed["notes"]
         if parsed.get("heading_path"):
@@ -236,6 +237,7 @@ def md_to_json(
         # Mark as manual if content was changed
         if new_content and new_content != old_content:
             merged["is_manual"] = True
+            merged["embedding_text"] = new_content
 
         # Ensure required fields
         merged.setdefault("chunk_id", chunk_id or f"md-chunk-{chunk_num}")
@@ -244,6 +246,8 @@ def md_to_json(
         merged.setdefault("page", 0)
         merged.setdefault("stored", False)
         merged.setdefault("is_manual", False)
+        merged.setdefault("display_content", merged.get("content", ""))
+        merged.setdefault("embedding_text", merged.get("content", ""))
 
         merged_chunks.append(merged)
 

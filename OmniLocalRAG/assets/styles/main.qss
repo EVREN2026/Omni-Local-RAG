@@ -13,11 +13,96 @@ QWidget {
     background-color: transparent;
 }
 
+/* ── System tray context menu ─────────────────────────────
+   QMenu inherits QWidget font, but "SF Pro Text" has no CJK glyphs,
+   which renders Chinese action text as empty boxes on Windows.
+   Override with a CJK-first stack so the system tray menu always
+   shows readable text regardless of the host OS locale.            */
+QMenu {
+    font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC",
+                 "Source Han Sans CN", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #e7edf2;
+    background-color: rgba(18, 22, 30, 240);
+    border: 1px solid rgba(255, 255, 255, 22);
+    border-radius: 10px;
+    padding: 4px 0;
+}
+
+QMenu::item {
+    padding: 7px 28px 7px 18px;
+    border-radius: 6px;
+    margin: 1px 4px;
+    color: #e7edf2;
+}
+
+QMenu::item:selected {
+    background: rgba(92, 178, 233, 0.22);
+    color: #f0f8ff;
+}
+
+QMenu::item:disabled {
+    color: rgba(231, 237, 242, 0.35);
+}
+
+QMenu::separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 14);
+    margin: 4px 12px;
+}
+
 /* ── Spotlight window container ──────────────────────────── */
 #SpotlightContainer {
-    background-color: rgba(10, 14, 20, 222);
-    border: 1px solid rgba(255, 255, 255, 26);
-    border-radius: 28px;
+    background-color: rgba(12, 16, 24, 214);
+    border: 1px solid rgba(255, 255, 255, 34);
+    border-radius: 30px;
+}
+
+#ResultBody {
+    background: transparent;
+}
+
+#ResultSectionLabel {
+    color: #8fd9c2;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 8px 0 8px;
+}
+
+#ResultPane {
+    background: rgba(255, 255, 255, 8);
+    border: 1px solid rgba(255, 255, 255, 12);
+    border-radius: 22px;
+    padding: 10px;
+}
+
+#KnowledgeCard {
+    background: rgba(248, 250, 252, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 22px;
+}
+
+#KnowledgeCardTitle {
+    color: #0f1720;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+#KnowledgeCardMeta {
+    color: #516174;
+    font-size: 12px;
+}
+
+#ResultSplitter::handle {
+    background: rgba(255, 255, 255, 10);
+    width: 8px;
+    margin: 12px 2px;
+    border-radius: 4px;
+}
+
+#ResultSplitter::handle:hover {
+    background: rgba(124, 211, 183, 46);
 }
 
 #SpotlightDragHandle {
@@ -30,9 +115,9 @@ QWidget {
 
 /* ── Search input ────────────────────────────────────────── */
 #SearchInput {
-    background: rgba(255, 255, 255, 14);
-    border: 1px solid rgba(255, 255, 255, 18);
-    border-radius: 20px;
+    background: rgba(255, 255, 255, 10);
+    border: 1px solid rgba(255, 255, 255, 14);
+    border-radius: 22px;
     color: #f8fbfd;
     font-size: 22px;
     padding: 0 22px;
@@ -42,7 +127,7 @@ QWidget {
 
 #SearchInput:focus {
     border: 1px solid rgba(124, 211, 183, 110);
-    background: rgba(255, 255, 255, 18);
+    background: rgba(255, 255, 255, 14);
 }
 
 /* ── Stop button ─────────────────────────────────────────── */
@@ -63,20 +148,20 @@ QWidget {
 }
 
 /* ── Answer / streaming text area ───────────────────────── */
-#AnswerArea {
-    background: rgba(255, 255, 255, 8);
-    border: 1px solid rgba(255, 255, 255, 14);
+#KnowledgeCardBody {
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(15, 23, 32, 0.08);
     border-radius: 18px;
-    padding: 14px 18px;
-    color: #dbe5ef;
-    font-size: 14px;
-    line-height: 1.6;
-    min-height: 80px;
-    max-height: 400px;
+    padding: 16px 18px;
+    color: #0f1720;
+    font-size: 15px;
+    line-height: 1.7;
+    min-height: 140px;
+    max-height: 720px;
 }
 
 /* QTextBrowser inherits QTextEdit rules; make scrollbar always visible */
-#AnswerArea QScrollBar:vertical {
+#KnowledgeCardBody QScrollBar:vertical {
     width: 8px;
 }
 
@@ -84,54 +169,83 @@ QWidget {
 #CardsScroll {
     border: none;
     background: transparent;
+    padding-top: 2px;
+}
+
+#ResultEmptyHint {
+    color: #7f94a7;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 10px 8px 4px 8px;
 }
 
 /* ── Result cards ────────────────────────────────────────── */
-#PDFCard,
-#VideoCard,
-#HybridCard {
+#ResultListCard {
     background: rgba(255, 255, 255, 8);
-    border: 1px solid rgba(255, 255, 255, 14);
+    border: 1px solid rgba(255, 255, 255, 10);
     border-radius: 18px;
 }
 
-#PDFCard:hover,
-#VideoCard:hover {
-    background: rgba(124, 211, 183, 20);
-    border: 1px solid rgba(124, 211, 183, 72);
+#ResultListCard:hover {
+    background: rgba(255, 255, 255, 12);
+    border: 1px solid rgba(255, 255, 255, 18);
 }
 
-#CardTitle {
+#ResultListCard[bestMatch="true"] {
+    background: rgba(92, 178, 233, 0.14);
+    border: 1px solid rgba(92, 178, 233, 0.24);
+}
+
+#ResultListCard[selected="true"] {
+    background: rgba(92, 178, 233, 32);
+    border: 1px solid rgba(92, 178, 233, 120);
+}
+
+#ResultListTitle {
     color: #f7fbff;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
 }
 
-#CardBody {
-    color: #dbe5ef;
+#ResultSummary {
+    color: #9ab0c3;
     font-size: 13px;
-    line-height: 1.45;
+    line-height: 1.5;
 }
 
-#CardThumb {
-    background: rgba(255, 255, 255, 6);
-    border: 1px solid rgba(255, 255, 255, 20);
-    border-radius: 14px;
-    color: #8fd9c2;
+#ResultMeta {
+    color: #7890a3;
     font-size: 11px;
 }
 
-#VideoThumb {
-    background: rgba(10, 14, 20, 180);
-    border: 1px solid rgba(255, 255, 255, 20);
-    border-radius: 14px;
-    color: #7cd3b7;
-    font-size: 26px;
+#ResultSourceTag {
+    background: rgba(12, 16, 24, 0.44);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: #dbe5ef;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 10px;
 }
 
-#VideoThumb:hover {
-    background: rgba(124, 211, 183, 28);
-    border: 1px solid rgba(124, 211, 183, 90);
+#KnowledgeActionButton {
+    background: rgba(15, 23, 32, 0.06);
+    border: 1px solid rgba(15, 23, 32, 0.10);
+    border-radius: 12px;
+    color: #1f2a35;
+    min-height: 30px;
+    padding: 0 14px;
+}
+
+#KnowledgeActionButton:hover {
+    background: rgba(92, 178, 233, 0.14);
+    border: 1px solid rgba(92, 178, 233, 0.24);
+}
+
+#KnowledgeActionButton:disabled {
+    color: rgba(31, 42, 53, 0.38);
+    background: rgba(15, 23, 32, 0.03);
+    border: 1px solid rgba(15, 23, 32, 0.06);
 }
 
 /* ── Knowledge Editor window ─────────────────────────────── */
@@ -325,4 +439,11 @@ QSplitter::handle {
     border: 1px solid rgba(255, 255, 255, 14);
     border-radius: 22px;
     padding: 10px;
+}
+
+
+#SearchTimingLabel {
+    color: #9ab7c9;
+    font-size: 12px;
+    padding: 0 8px 2px 8px;
 }

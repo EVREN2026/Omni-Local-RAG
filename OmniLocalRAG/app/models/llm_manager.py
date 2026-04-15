@@ -115,7 +115,26 @@ class LLMManager:
         client = LLMHttpClient(LlamaServerManager().base_url)
 
         if stream:
-            yield from client.chat_stream(messages)
+            emitted = False
+            for token in client.chat_stream(messages):
+                emitted = True
+                yield token
+            if not emitted:
+                try:
+                    fallback = client.chat_once_with_meta(messages)
+                except Exception as e:
+                    logger.warning(
+                        "llama-server stream returned no visible content and "
+                        f"non-stream fallback failed: {e}"
+                    )
+                    return
+                text = str(fallback.get("text") or "").strip()
+                if text:
+                    logger.warning(
+                        "llama-server stream returned no visible content; "
+                        "falling back to non-stream response"
+                    )
+                    yield text
         else:
             text = client.chat_once(messages)
             if text:

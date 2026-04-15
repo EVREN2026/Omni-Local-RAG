@@ -1,60 +1,41 @@
 import importlib
-import sys
-import tempfile
-import types
 import unittest
-from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
 
-class FakeLlama:
-    calls = []
-    fail_gpu_once = False
-    fail_always = False
+class _FakeServerManager:
+    def __init__(self, running=False, start_ok=True, last_error="", base_url="http://127.0.0.1:8000"):
+        self._running = running
+        self._start_ok = start_ok
+        self.last_error = last_error
+        self.base_url = base_url
+        self.ensure_started_calls = []
 
-    def __init__(self, model_path, n_gpu_layers=0, n_ctx=4096, verbose=False):
-        self.__class__.calls.append(
-            {
-                "model_path": model_path,
-                "n_gpu_layers": n_gpu_layers,
-                "n_ctx": n_ctx,
-                "verbose": verbose,
-            }
-        )
-        if self.__class__.fail_always:
-            raise OSError("exception: access violation reading 0x0000000000000000")
-        if n_gpu_layers > 0 and self.__class__.fail_gpu_once:
-            self.__class__.fail_gpu_once = False
-            raise OSError("GPU backend failed")
+    @property
+    def is_running(self):
+        return self._running
 
+    def ensure_started(self, model_path=None):
+        self.ensure_started_calls.append(model_path)
+        if self._start_ok:
+            self._running = True
+            return True
+        return False
 
-class FakeTokenProcess:
-    def __init__(self):
-        self.stdin = StringIO()
-        self.stdout = StringIO(
-            '{"type":"token","text":"本地"}\n'
-            '{"type":"token","text":"回答"}\n'
-            '{"type":"done"}\n'
-        )
-
-    def wait(self, timeout=None):
-        return 0
-
-    def kill(self):
-        pass
+    def stop(self):
+        self._running = False
 
 
-class FakeCrashProcess:
-    def __init__(self):
-        self.stdin = StringIO()
-        self.stdout = StringIO("Windows fatal exception: access violation\n")
+class _FakeHttpClient:
+    def __init__(self, base_url):
+        self.base_url = base_url
 
-    def wait(self, timeout=None):
-        return 3221225477
+    def chat_stream(self, messages):
+        yield "本地"
+        yield "回答"
 
-    def kill(self):
-        pass
+    def chat_once(self, messages):
+        return "本地回答"
 
 
 class LLMManagerLoadTest(unittest.TestCase):
@@ -62,104 +43,64 @@ class LLMManagerLoadTest(unittest.TestCase):
         from app.utils import config as cfg
 
         self.cfg = cfg
-        self.old_base = cfg._BASE
-        self.old_config_path = cfg._CONFIG_PATH
         self.old_cache = dict(cfg._cache)
-        self.temp_dir = tempfile.TemporaryDirectory()
-        cfg._BASE = Path(self.temp_dir.name)
-        cfg._CONFIG_PATH = cfg._BASE / "config.json"
-
-        model_path = Path(self.temp_dir.name) / "models" / "gemma.gguf"
-        model_path.parent.mkdir(parents=True)
-        model_path.write_text("fake gguf", encoding="utf-8")
         cfg._cache = {
             "llm": {
-                "model_path": "models/gemma.gguf",
-                "subprocess": False,
-                "n_gpu_layers": 999,
+                "enabled": True,
+                "model_path": "models/gemma-4-2b-it-q4_k_m.gguf",
+                "n_gpu_layers": 0,
                 "n_ctx": 4096,
-            }
+            },
+            "llama_server": {
+                "model_path": "models/gemma-4-2b-it-q4_k_m.gguf",
+                "host": "127.0.0.1",
+                "port": 8000,
+            },
         }
-
-        fake_llama_cpp = types.ModuleType("llama_cpp")
-        fake_llama_cpp.Llama = FakeLlama
-        self.old_llama_cpp = sys.modules.get("llama_cpp")
-        sys.modules["llama_cpp"] = fake_llama_cpp
-
         self.llm_manager = importlib.import_module("app.models.llm_manager")
         self.old_instance = self.llm_manager.LLMManager._instance
-        self.old_llm = self.llm_manager.LLMManager._llm
         self.old_last_error = self.llm_manager.LLMManager._last_error
-        self.old_load_failed = self.llm_manager.LLMManager._load_failed
-        self.old_subprocess_mode = self.llm_manager.LLMManager._subprocess_mode
+        self.old_server_ready = self.llm_manager.LLMManager._server_ready
         self.llm_manager.LLMManager._instance = None
-        self.llm_manager.LLMManager._llm = None
         self.llm_manager.LLMManager._last_error = ""
-        self.llm_manager.LLMManager._load_failed = False
-        self.llm_manager.LLMManager._subprocess_mode = False
-        FakeLlama.calls = []
-        FakeLlama.fail_gpu_once = False
-        FakeLlama.fail_always = False
+        self.llm_manager.LLMManager._server_ready = False
 
     def tearDown(self):
         self.llm_manager.LLMManager._instance = self.old_instance
-        self.llm_manager.LLMManager._llm = self.old_llm
         self.llm_manager.LLMManager._last_error = self.old_last_error
-        self.llm_manager.LLMManager._load_failed = self.old_load_failed
-        self.llm_manager.LLMManager._subprocess_mode = self.old_subprocess_mode
-        self.cfg._BASE = self.old_base
-        self.cfg._CONFIG_PATH = self.old_config_path
+        self.llm_manager.LLMManager._server_ready = self.old_server_ready
         self.cfg._cache = self.old_cache
-        if self.old_llama_cpp is None:
-            sys.modules.pop("llama_cpp", None)
-        else:
-            sys.modules["llama_cpp"] = self.old_llama_cpp
-        self.temp_dir.cleanup()
 
-    def test_gpu_llm_load_failure_retries_cpu(self):
-        FakeLlama.fail_gpu_once = True
-        manager = self.llm_manager.LLMManager()
-
-        with patch.object(self.llm_manager.logger, "warning"):
+    def test_load_success_starts_llama_server(self):
+        fake_mgr = _FakeServerManager(running=False, start_ok=True)
+        with patch("app.models.llama_server_manager.LlamaServerManager", return_value=fake_mgr):
+            manager = self.llm_manager.LLMManager()
             self.assertTrue(manager.load())
-
-        self.assertEqual([call["n_gpu_layers"] for call in FakeLlama.calls], [999, 0])
         self.assertEqual(manager.last_error, "")
+        self.assertEqual(len(fake_mgr.ensure_started_calls), 1)
 
-    def test_native_backend_access_violation_is_reported_as_environment_problem(self):
-        FakeLlama.fail_always = True
-        manager = self.llm_manager.LLMManager()
-
-        with patch.object(self.llm_manager.logger, "warning"), patch.object(
-            self.llm_manager.logger, "error"
-        ):
+    def test_load_failure_propagates_error(self):
+        fake_mgr = _FakeServerManager(running=False, start_ok=False, last_error="server start failed")
+        with patch("app.models.llama_server_manager.LlamaServerManager", return_value=fake_mgr):
+            manager = self.llm_manager.LLMManager()
             self.assertFalse(manager.load())
+            self.assertIn("server start failed", manager.last_error)
 
-        self.assertIn("llama-cpp-python 原生后端初始化失败", manager.last_error)
-        self.assertIn("不是 models/ 目录缺失", manager.last_error)
-
-    def test_subprocess_llm_streams_tokens_without_importing_llama_in_parent(self):
-        self.cfg._cache["llm"]["subprocess"] = True
-        manager = self.llm_manager.LLMManager()
-
-        self.assertTrue(manager.load())
-        with patch.object(self.llm_manager.subprocess, "Popen", return_value=FakeTokenProcess()):
-            text = "".join(manager.generate("prompt"))
-
+    def test_generate_stream_uses_http_client(self):
+        fake_mgr = _FakeServerManager(running=True)
+        with patch("app.models.llama_server_manager.LlamaServerManager", return_value=fake_mgr), patch(
+            "app.models.llm_http_client.LLMHttpClient", _FakeHttpClient
+        ):
+            manager = self.llm_manager.LLMManager()
+            text = "".join(manager.generate("prompt", stream=True))
         self.assertEqual(text, "本地回答")
-        self.assertEqual(FakeLlama.calls, [])
 
-    def test_subprocess_llm_crash_reports_error_without_parent_crash(self):
-        self.cfg._cache["llm"]["subprocess"] = True
-        manager = self.llm_manager.LLMManager()
-
-        self.assertTrue(manager.load())
-        with patch.object(self.llm_manager.subprocess, "Popen", return_value=FakeCrashProcess()):
-            with self.assertRaises(self.llm_manager.LLMSubprocessError):
-                list(manager.generate("prompt"))
-
-        self.assertIn("LLM 子进程异常退出", manager.last_error)
-        self.assertIn("主程序已保护不崩溃", manager.last_error)
+    def test_generate_raises_when_server_not_running(self):
+        fake_mgr = _FakeServerManager(running=False)
+        with patch("app.models.llama_server_manager.LlamaServerManager", return_value=fake_mgr):
+            manager = self.llm_manager.LLMManager()
+            with self.assertRaises(RuntimeError):
+                list(manager.generate("prompt", stream=True))
 
 
 if __name__ == "__main__":

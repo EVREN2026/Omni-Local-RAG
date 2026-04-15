@@ -1,0 +1,78 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ApiSettingsPanel</class>
+ <widget class="QWidget" name="ApiSettingsPanel">
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="leftMargin"><number>12</number></property>
+   <property name="topMargin"><number>12</number></property>
+   <property name="rightMargin"><number>12</number></property>
+   <property name="bottomMargin"><number>12</number></property>
+   <property name="spacing"><number>10</number></property>
+   <item><widget class="QLabel" name="titleLabel"><property name="text"><string>API 模型配置</string></property></widget></item>
+   <item><widget class="QLabel" name="descriptionLabel"><property name="wordWrap"><bool>true</bool></property><property name="text"><string>配置用于切片优化的外部 API 模型，支持 OpenAI、Claude、Gemini 与自定义 OpenAI 兼容接口。</string></property></widget></item>
+   <item>
+    <widget class="QGroupBox" name="providerGroup">
+     <property name="title"><string>提供商选择</string></property>
+     <layout class="QFormLayout" name="providerFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="providerLabel"><property name="text"><string>API 提供商:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QComboBox" name="providerCombo"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="baseUrlLabel"><property name="text"><string>Base URL:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QLineEdit" name="baseUrlEdit"><property name="placeholderText"><string>留空使用默认地址，自定义时填写完整 Base URL</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="apiKeyLabel"><property name="text"><string>API Key:</string></property></widget></item>
+      <item row="2" column="1">
+       <widget class="QWidget" name="apiKeyRowWidget">
+        <layout class="QHBoxLayout" name="apiKeyRowLayout">
+         <property name="leftMargin"><number>0</number></property>
+         <property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property>
+         <property name="bottomMargin"><number>0</number></property>
+         <item><widget class="QLineEdit" name="apiKeyEdit"><property name="echoMode"><enum>QLineEdit::Password</enum></property><property name="placeholderText"><string>sk-... 或 API Key</string></property></widget></item>
+         <item><widget class="QPushButton" name="showKeyButton"><property name="text"><string>显示</string></property><property name="checkable"><bool>true</bool></property></widget></item>
+        </layout>
+       </widget>
+      </item>
+      <item row="3" column="0"><widget class="QLabel" name="modelLabel"><property name="text"><string>模型名称:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QLineEdit" name="modelEdit"><property name="placeholderText"><string>例如 gpt-4o-mini / claude-3-5-sonnet</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="generationGroup">
+     <property name="title"><string>生成参数</string></property>
+     <layout class="QFormLayout" name="generationFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="temperatureLabel"><property name="text"><string>Temperature:</string></property></widget></item>
+      <item row="0" column="1">
+       <widget class="QWidget" name="temperatureRowWidget">
+        <layout class="QHBoxLayout" name="temperatureRowLayout">
+         <property name="leftMargin"><number>0</number></property>
+         <property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property>
+         <property name="bottomMargin"><number>0</number></property>
+         <item><widget class="QSlider" name="tempSlider"><property name="orientation"><enum>Qt::Horizontal</enum></property></widget></item>
+         <item><widget class="QLabel" name="tempValueLabel"><property name="text"><string>0.2</string></property></widget></item>
+        </layout>
+       </widget>
+      </item>
+      <item row="1" column="0"><widget class="QLabel" name="maxTokensLabel"><property name="text"><string>Max tokens:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="maxTokensSpin"/></item>
+      <item row="2" column="0"><widget class="QLabel" name="batchSizeLabel"><property name="text"><string>Batch size:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QSpinBox" name="batchSizeSpin"/></item>
+      <item row="3" column="0"><widget class="QLabel" name="timeoutLabel"><property name="text"><string>超时:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QSpinBox" name="timeoutSpin"/></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="actionsLayout">
+     <item><widget class="QPushButton" name="testButton"><property name="text"><string>测试连接</string></property></widget></item>
+     <item><spacer name="actionsSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+     <item><widget class="QPushButton" name="saveButton"><property name="text"><string>保存配置</string></property></widget></item>
+    </layout>
+   </item>
+   <item><widget class="QTextEdit" name="statusEdit"><property name="readOnly"><bool>true</bool></property><property name="placeholderText"><string>测试结果和日志将显示在这里...</string></property></widget></item>
+   <item><spacer name="bottomSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property></spacer></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

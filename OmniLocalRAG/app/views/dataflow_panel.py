@@ -381,7 +381,7 @@ class DataflowPanel(QWidget):
         self._chunk_table.setRowCount(0)
         for i, chunk in enumerate(chunks):
             self._chunk_table.insertRow(i)
-            content_preview = str(chunk.get("content", ""))[:80].replace("\n", " ")
+            content_preview = str(chunk.get("display_content") or chunk.get("content", ""))[:80].replace("\n", " ")
             items = [
                 QTableWidgetItem(str(i + 1)),
                 QTableWidgetItem(str(chunk.get("heading_path", ""))),
@@ -397,7 +397,7 @@ class DataflowPanel(QWidget):
 
     def _on_chunk_double_clicked(self, row: int, col: int) -> None:
         if row < len(self._current_chunks):
-            content = self._current_chunks[row].get("content", "")
+            content = self._current_chunks[row].get("display_content") or self._current_chunks[row].get("content", "")
             self._chunk_editor.setPlainText(content)
             self._chunk_editor.setProperty("editing_row", row)
 
@@ -411,6 +411,8 @@ class DataflowPanel(QWidget):
             return
         chunk_id = self._current_chunks[row].get("id", "")
         self._current_chunks[row]["content"] = new_content
+        self._current_chunks[row]["display_content"] = new_content
+        self._current_chunks[row]["embedding_text"] = new_content
         self._current_chunks[row]["is_manual"] = True
         # Update table preview
         self._chunk_table.item(row, 3).setText("✓")

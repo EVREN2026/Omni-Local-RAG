@@ -1,12 +1,6 @@
-# Local wheels
+# Local wheels (optional)
 
-Place the llama-cpp-python wheel here before running `install.bat`:
+This project no longer requires `llama-cpp-python` wheels.
 
-```text
-llama_cpp_python-0.3.19-cp312-cp312-win_amd64.whl
-```
-
-The install scripts also accept the same wheel in the repository root.
-
-This wheel is intentionally not committed to git because it is a large binary
-artifact and is Python-version/platform specific.
+Keep this folder only for optional offline Python package wheels if needed.
+By default, installation scripts use online indexes.

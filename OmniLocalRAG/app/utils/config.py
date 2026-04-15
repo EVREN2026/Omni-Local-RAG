@@ -14,6 +14,11 @@ _DEFAULT: dict = {
         "max_tokens": 512,
         "temperature": 0.7,
         "repeat_penalty": 1.1,
+        "top_k": 40,
+        "top_p": 0.9,
+        "min_p": 0.05,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
     },
     "llama_server": {
         # llama-server.exe 专用配置；留空则继承 llm.* 对应字段
@@ -24,6 +29,9 @@ _DEFAULT: dict = {
         "n_gpu_layers":     999,
         "ctx_size":         8192,
         "threads":          -1,                          # -1 = llama-server 自动
+        "parallel":         2,
+        "batch_size":       1024,
+        "ubatch_size":      512,
         "flash_attn":       True,
         "no_mmap":          True,
         "numa":             "distribute",
@@ -31,8 +39,21 @@ _DEFAULT: dict = {
         "auto_download":    True,                        # 找不到时从 GitHub 下载
         "startup_timeout":  180,
     },
-    "embed": {"model_path": "models/bge-m3", "device": "cpu"},
-    "retrieval": {"top_k": 5, "distance_threshold": 0.7},
+    "embed": {
+        "model_path": "models/bge-m3",
+        "device": "cpu",
+        "backend": "auto",
+        "batch_size": 12,
+        "max_length": 8192,
+        "sparse_top_k": 96,
+    },
+    "retrieval": {
+        "top_k": 5,
+        "distance_threshold": 0.7,
+        "mode": "hybrid",
+        "hybrid_dense_weight": 0.65,
+        "hybrid_sparse_weight": 0.35,
+    },
     "qa_memory": {
         "enabled": True,
         "path": "data/eval/qa_dialogue_memory.md",
@@ -127,3 +148,4 @@ def get(key_path: str, default: Any = None) -> Any:
 def abs_path(relative: str) -> Path:
     """Resolve a config-relative path to an absolute path."""
     return _BASE / relative
+

@@ -1,11 +1,10 @@
-"""
+﻿"""
 PdfImportPanel - file import configuration dialog.
 
 Main features:
 - File chooser
 - Two-column conversion tech area
-  - Left: parser type selection and ordering
-  - Right: tech intro, image-data capability, and parser parameters
+- Parser intro and parameter forms
 - Optional page range
 - Save config and start import
 """
@@ -23,13 +22,13 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
     QSpinBox,
+    QLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +36,7 @@ from PyQt5.QtWidgets import (
 from app.parsers.document_parsers import PARSER_REGISTRY, ParserParameter, available_parser_names
 from app.utils import config as cfg
 from app.utils.logger import logger
+from app.utils.ui_loader import load_ui, optional_child, require_child, resolve_layout
 
 _ALL_PARSERS = available_parser_names()
 
@@ -49,7 +49,7 @@ _PARSER_TECH_INFO: Dict[str, Dict[str, str]] = {
     "marker": {
         "intro": "面向版面复杂 PDF 的解析器，适合图文混排文档。",
         "image_data": "是（可生成 Markdown 图片引用）",
-        "basic": "支持 CPU/CUDA，图像文件是否可显示取决于后续资产落盘策略。",
+        "basic": "支持 CPU/CUDA；图像文件是否可显示取决于后续资源落盘策略。",
     },
     "unstructured": {
         "intro": "通用文档解析方案，偏文本鲁棒性。",
@@ -59,7 +59,7 @@ _PARSER_TECH_INFO: Dict[str, Dict[str, str]] = {
     "mineru": {
         "intro": "通过 MinerU 命令行进行版面转换。",
         "image_data": "是（可生成 images 路径引用）",
-        "basic": "当前集成使用临时目录，若需编辑器显示图片需持久化图片目录。",
+        "basic": "当前集成使用临时目录；若需编辑器直接显示图片，建议持久化图像目录。",
     },
     "ocr": {
         "intro": "按页渲染后执行 OCR，适合扫描件。",
@@ -74,18 +74,9 @@ class PdfImportPanel(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("文件导入配置")
-        self.setMinimumWidth(900)
-
         self._file_path: Optional[str] = None
         self._parser_param_groups: Dict[str, QGroupBox] = {}
         self._parser_param_widgets: Dict[str, Dict[str, QWidget]] = {}
-
-        self._parser_intro_title: Optional[QLabel] = None
-        self._parser_intro_text: Optional[QLabel] = None
-        self._parser_intro_image: Optional[QLabel] = None
-        self._parser_intro_basic: Optional[QLabel] = None
-
         self._build()
         self._load_from_config()
 
@@ -93,75 +84,42 @@ class PdfImportPanel(QDialog):
         return self._file_path
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setSpacing(10)
+        load_ui(self, "pdf_import_panel.ui")
+        self.setWindowTitle("文件导入配置")
+        self.setMinimumWidth(900)
 
-        file_group = QGroupBox("目标文件（PDF/Office/文本）")
-        file_layout = QHBoxLayout(file_group)
-        self._file_edit = QLineEdit()
-        self._file_edit.setPlaceholderText("点击右侧按钮选择文件…")
-        self._file_edit.setReadOnly(True)
-        browse_btn = QPushButton("浏览…")
-        browse_btn.setFixedWidth(70)
-        browse_btn.clicked.connect(self._browse_file)
-        file_layout.addWidget(self._file_edit)
-        file_layout.addWidget(browse_btn)
-        root.addWidget(file_group)
+        self._file_edit = require_child(self, QLineEdit, "fileEdit", "PdfImportPanel UI")
+        self._parser_list = require_child(self, QListWidget, "parserList", "PdfImportPanel UI")
+        self._parser_intro_title = require_child(self, QLabel, "parserIntroTitleLabel", "PdfImportPanel UI")
+        self._parser_intro_text = require_child(self, QLabel, "parserIntroTextLabel", "PdfImportPanel UI")
+        self._parser_intro_image = require_child(self, QLabel, "parserIntroImageLabel", "PdfImportPanel UI")
+        self._parser_intro_basic = require_child(self, QLabel, "parserIntroBasicLabel", "PdfImportPanel UI")
+        self._start_page_spin = require_child(self, QSpinBox, "startPageSpin", "PdfImportPanel UI")
+        self._end_page_spin = require_child(self, QSpinBox, "endPageSpin", "PdfImportPanel UI")
+        self._button_box = require_child(self, QDialogButtonBox, "buttonBox", "PdfImportPanel UI")
+        browse_btn = require_child(self, QPushButton, "browseButton", "PdfImportPanel UI")
+        self._parser_params_host = optional_child(self, QWidget, "parserParamsHostWidget")
+        params_layout = resolve_layout(
+            self,
+            host_widget_name="parserParamsHostWidget",
+            layout_name="parserParamsHostLayout",
+            fallback_widget_name="introGroup",
+            ui_name="PdfImportPanel UI",
+        )
 
-        parser_row = QHBoxLayout()
-        parser_row.setSpacing(10)
-
-        parser_group = QGroupBox("转换技术类型（第一项为当前使用，不自动降级）")
-        parser_layout = QHBoxLayout(parser_group)
-        self._parser_list = QListWidget()
-        self._parser_list.setDragDropMode(QListWidget.InternalMove)
-        self._parser_list.setMinimumHeight(180)
-        self._parser_list.currentRowChanged.connect(lambda _: self._update_parser_params_panel())
-        parser_layout.addWidget(self._parser_list)
-        parser_row.addWidget(parser_group, 1)
-
-        intro_group = QGroupBox("技术介绍 / 图像能力 / 参数")
-        intro_layout = QVBoxLayout(intro_group)
-        self._parser_intro_title = QLabel("")
-        self._parser_intro_title.setStyleSheet("font-weight: 600;")
-        self._parser_intro_text = QLabel("")
-        self._parser_intro_text.setWordWrap(True)
-        self._parser_intro_image = QLabel("")
-        self._parser_intro_image.setWordWrap(True)
-        self._parser_intro_basic = QLabel("")
-        self._parser_intro_basic.setWordWrap(True)
-
-        intro_layout.addWidget(self._parser_intro_title)
-        intro_layout.addWidget(self._parser_intro_text)
-        intro_layout.addWidget(self._parser_intro_image)
-        intro_layout.addWidget(self._parser_intro_basic)
-
-        self._build_parser_param_groups(intro_layout)
-        parser_row.addWidget(intro_group, 2)
-        root.addLayout(parser_row)
-
-        page_group = QGroupBox("页面范围（留空表示全部）")
-        page_layout = QHBoxLayout(page_group)
-        page_layout.addWidget(QLabel("起始页"))
-        self._start_page_spin = QSpinBox()
         self._start_page_spin.setRange(0, 9999)
         self._start_page_spin.setSpecialValueText("全部")
-        page_layout.addWidget(self._start_page_spin)
-        page_layout.addWidget(QLabel("结束页"))
-        self._end_page_spin = QSpinBox()
         self._end_page_spin.setRange(0, 9999)
         self._end_page_spin.setSpecialValueText("全部")
-        page_layout.addWidget(self._end_page_spin)
-        page_layout.addStretch()
-        root.addWidget(page_group)
 
-        btn_box = QDialogButtonBox()
-        self._import_btn = btn_box.addButton("保存并开始导入", QDialogButtonBox.AcceptRole)
+        self._import_btn = self._button_box.addButton("保存并开始导入", QDialogButtonBox.AcceptRole)
         self._import_btn.setEnabled(False)
-        btn_box.addButton("取消", QDialogButtonBox.RejectRole)
-        btn_box.accepted.connect(self._on_accept)
-        btn_box.rejected.connect(self.reject)
-        root.addWidget(btn_box)
+        self._button_box.accepted.connect(self._on_accept)
+        self._button_box.rejected.connect(self.reject)
+        browse_btn.clicked.connect(self._browse_file)
+        self._parser_list.currentRowChanged.connect(lambda _: self._update_parser_params_panel())
+
+        self._build_parser_param_groups(params_layout)
 
     def _load_from_config(self) -> None:
         order = cfg.get("pdf.parser_order", _ALL_PARSERS)
@@ -194,7 +152,6 @@ class PdfImportPanel(QDialog):
         raw.setdefault("pdf", {})
         raw["pdf"]["parser_order"] = parser_order
         raw["pdf"]["parser_options"] = self._collect_parser_options()
-
         raw["pdf"]["marker_device"] = raw["pdf"]["parser_options"].get("marker", {}).get("device", "cpu")
         raw["pdf"]["ocr_lang"] = raw["pdf"]["parser_options"].get("ocr", {}).get("lang", "chi_sim+eng")
         raw["pdf"]["mineru_cmd"] = raw["pdf"]["parser_options"].get("mineru", {}).get("command", "mineru")
@@ -231,8 +188,7 @@ class PdfImportPanel(QDialog):
     def _update_parser_intro_panel(self, parser_name: str) -> None:
         parser = PARSER_REGISTRY.get(parser_name)
         if parser is None:
-            if self._parser_intro_title:
-                self._parser_intro_title.setText("未找到解析器")
+            self._parser_intro_title.setText("未找到解析器")
             return
 
         info = _PARSER_TECH_INFO.get(parser_name, {})
@@ -242,14 +198,10 @@ class PdfImportPanel(QDialog):
         schema = parser.parameter_schema()
         param_labels = "、".join([p.label for p in schema]) if schema else "无"
 
-        if self._parser_intro_title:
-            self._parser_intro_title.setText(f"{parser.display_name} ({parser_name})")
-        if self._parser_intro_text:
-            self._parser_intro_text.setText(f"技术说明: {intro}")
-        if self._parser_intro_image:
-            self._parser_intro_image.setText(f"是否生成图像数据: {image_data}")
-        if self._parser_intro_basic:
-            self._parser_intro_basic.setText(f"基础信息: {basic}\n可配置参数: {param_labels}")
+        self._parser_intro_title.setText(f"{parser.display_name} ({parser_name})")
+        self._parser_intro_text.setText(f"技术说明: {intro}")
+        self._parser_intro_image.setText(f"是否生成图像数据: {image_data}")
+        self._parser_intro_basic.setText(f"基础信息: {basic}\n可配置参数: {param_labels}")
 
     def _current_parser_name(self) -> str:
         row = self._parser_list.currentRow()

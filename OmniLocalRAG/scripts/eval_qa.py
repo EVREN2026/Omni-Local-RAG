@@ -113,8 +113,14 @@ def run_eval(
 
         t0 = time.perf_counter()
         try:
-            [q_vec] = embed.encode([question])
-            chunks = chroma.query(q_vec, n_results=top_k)
+            query_sparse = None
+            if hasattr(embed, "encode_payloads"):
+                [query_payload] = embed.encode_payloads([question], return_sparse=True)
+                q_vec = list(query_payload.get("dense") or [])
+                query_sparse = query_payload.get("sparse") or None
+            else:
+                [q_vec] = embed.encode([question])
+            chunks = chroma.query(q_vec, n_results=top_k, query_text=question, query_sparse=query_sparse)
         except Exception as e:
             print(f"  [{qa_id}] ERROR during retrieval: {e}")
             chunks = []

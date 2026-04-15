@@ -50,7 +50,14 @@ class _ClipIngestWorker(QThread):
                 f"时间: {self.start_sec:.2f}s - {self.end_sec:.2f}s\n"
                 f"摘要: {self.semantic_summary}"
             )
-            [vec] = embed.encode([text])
+            sparse_payload = None
+            embed_backend = getattr(embed, "backend", "")
+            if hasattr(embed, "encode_payloads"):
+                [embedding_payload] = embed.encode_payloads([text], return_sparse=True)
+                vec = list(embedding_payload.get("dense") or [])
+                sparse_payload = embedding_payload.get("sparse") or None
+            else:
+                [vec] = embed.encode([text])
             ChromaStore().add(
                 content=text,
                 embedding=vec,
@@ -61,6 +68,8 @@ class _ClipIngestWorker(QThread):
                     "start": self.start_sec,
                     "end": self.end_sec,
                 },
+                sparse_payload=sparse_payload,
+                embed_backend=embed_backend,
                 is_manual=True,
                 doc_id=self.clip_id,
             )
@@ -162,4 +171,3 @@ class IngestController(QObject):
         self.clip_indexed.emit(clip_id, success)
         # Clean up finished workers
         self._clip_workers = [w for w in self._clip_workers if w.isRunning()]
-

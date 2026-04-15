@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import platform
+import json
 import shutil
 import subprocess
 import threading
@@ -41,6 +42,8 @@ _BUNDLED_CUDA_DIR = "models/llama-b8747-bin-win-cuda-12.4-x64"
 _GH_RELEASES_BASE = (
     "https://github.com/ggml-org/llama.cpp/releases/latest/download"
 )
+
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────────
@@ -204,7 +207,9 @@ class LlamaServerManager:
     @property
     def is_running(self) -> bool:
         with self._lock:
-            return self._proc is not None and self._proc.poll() is None
+            if self._proc is not None and self._proc.poll() is None:
+                return True
+        return self.health_check()
 
     @property
     def last_error(self) -> str:
@@ -240,6 +245,34 @@ class LlamaServerManager:
                 # 模型不同，需要重启
                 self._stop_locked()
 
+            # A previous app run or a manual launch may already own the port.
+            # Reuse it when it is healthy instead of starting a duplicate
+            # process that would fail with "address already in use".
+            if self.health_check():
+                remote_props = self._remote_props() or {}
+                remote_model = str(remote_props.get("model_path", "") or "") or None
+                if remote_model and not self._same_path(remote_model, target_model):
+                    self._last_error = (
+                        "A llama-server is already running, but its model differs from the current config: "
+                        f"{remote_model} != {target_model}"
+                    )
+                    logger.error(self._last_error)
+                    return False
+                remote_ctx = (
+                    remote_props.get("default_generation_settings", {})
+                    .get("n_ctx")
+                )
+                build_info = str(remote_props.get("build_info", "") or "")
+                self._current_model = target_model
+                logger.warning(
+                    "Reusing running llama-server: "
+                    f"{self.base_url} "
+                    f"(build={build_info or 'unknown'}, "
+                    f"model={remote_model or 'unknown'}, "
+                    f"n_ctx={remote_ctx if remote_ctx is not None else 'unknown'})"
+                )
+                return True
+
             return self._start_locked(target_model)
 
     def stop(self) -> None:
@@ -251,10 +284,34 @@ class LlamaServerManager:
         try:
             url = f"{self.base_url}/health"
             req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with _LOCAL_OPENER.open(req, timeout=3) as resp:
                 return resp.status == 200
         except Exception:
             return False
+
+    def _remote_model_path(self) -> Optional[str]:
+        """Read the model path from an already-running llama-server."""
+        props = self._remote_props()
+        if not props:
+            return None
+        model_path = str(props.get("model_path", "") or "")
+        return model_path or None
+
+    def _remote_props(self) -> Optional[dict]:
+        """Read /props from an already-running llama-server."""
+        try:
+            req = urllib.request.Request(f"{self.base_url}/props")
+            with _LOCAL_OPENER.open(req, timeout=3) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _same_path(left: str, right: str) -> bool:
+        try:
+            return Path(left).resolve() == Path(right).resolve()
+        except Exception:
+            return left == right
 
     # ── 内部方法（必须在 _lock 持有时调用） ──────────────────────────────
 
@@ -362,6 +419,9 @@ class LlamaServerManager:
         ctx_size  = int(cfg.get("llama_server.ctx_size",
                                 cfg.get("llm.n_ctx",       8192)))
         threads   = int(cfg.get("llama_server.threads",      -1))
+        parallel  = int(cfg.get("llama_server.parallel",     2))
+        batch_size= int(cfg.get("llama_server.batch_size",   1024))
+        ubatch    = int(cfg.get("llama_server.ubatch_size",  512))
         flash_attn= bool(cfg.get("llama_server.flash_attn",  True))
         no_mmap   = bool(cfg.get("llama_server.no_mmap",     True))
         numa      = cfg.get("llama_server.numa",             "distribute")
@@ -380,6 +440,15 @@ class LlamaServerManager:
 
         if threads > 0:
             cmd += ["--threads", str(threads)]
+
+        if parallel > 0:
+            cmd += ["--parallel", str(parallel)]
+
+        if batch_size > 0:
+            cmd += ["--batch-size", str(batch_size)]
+
+        if ubatch > 0:
+            cmd += ["--ubatch-size", str(min(ubatch, batch_size) if batch_size > 0 else ubatch)]
 
         if flash_attn:
             cmd += ["--flash-attn", "on"]

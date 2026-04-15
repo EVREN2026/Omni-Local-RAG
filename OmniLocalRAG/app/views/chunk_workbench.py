@@ -30,7 +30,7 @@ from app.models.metadata_exporter import MetadataExporter
 from app.models.stable_ids import stable_chunk_id
 from app.utils import config as cfg
 from app.utils.logger import logger
-from app.models.chunker import markdown_to_items as _markdown_to_items
+from app.models.chunker import coerce_chunk_item, markdown_to_items as _markdown_to_items
 
 
 class ChunkWorkbench(QWidget):
@@ -156,15 +156,16 @@ class ChunkWorkbench(QWidget):
         items = _markdown_to_items(markdown)
         rows = []
         used_ids = set()
-        for text, page, coords, heading_path in items:
-            if not str(text).strip():
+        for item in items:
+            chunk_item = coerce_chunk_item(item)
+            if not str(chunk_item.display_content).strip():
                 continue
             chunk_id = stable_chunk_id(
                 source_file=self._current_file,
                 source_type=self._current_source_type,
-                page=page,
-                heading_path=heading_path,
-                content=text,
+                page=chunk_item.page,
+                heading_path=chunk_item.heading_path,
+                content=chunk_item.display_content,
                 used_ids=used_ids,
             )
             rows.append(
@@ -172,11 +173,14 @@ class ChunkWorkbench(QWidget):
                     "chunk_id": chunk_id,
                     "anchor_id": chunk_id,
                     "source_type": self._current_source_type,
-                    "page": page,
-                    "coords": coords,
-                    "heading_path": heading_path,
-                    "block_type": "text",
-                    "content": text,
+                    "page": chunk_item.page,
+                    "coords": chunk_item.coords,
+                    "heading_path": chunk_item.heading_path,
+                    "block_type": chunk_item.block_type,
+                    "content": chunk_item.display_content,
+                    "display_content": chunk_item.display_content,
+                    "embedding_text": chunk_item.embedding_text,
+                    "metadata": dict(chunk_item.metadata or {}),
                     "vector_dim": None,
                     "stored": False,
                     "is_manual": True,
@@ -224,7 +228,7 @@ class ChunkWorkbench(QWidget):
         self._chunk_table.setRowCount(0)
         for i, chunk in enumerate(chunks):
             self._chunk_table.insertRow(i)
-            preview = str(chunk.get("content", ""))[:100].replace("\n", " ")
+            preview = str(chunk.get("display_content") or chunk.get("content", ""))[:100].replace("\n", " ")
             values = [
                 str(i + 1),
                 str(chunk.get("page", "")),

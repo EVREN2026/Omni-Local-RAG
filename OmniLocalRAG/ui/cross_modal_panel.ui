@@ -1,0 +1,159 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CrossModalPanel</class>
+ <widget class="QWidget" name="CrossModalPanel">
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>8</number>
+   </property>
+   <property name="topMargin">
+    <number>8</number>
+   </property>
+   <property name="rightMargin">
+    <number>8</number>
+   </property>
+   <property name="bottomMargin">
+    <number>8</number>
+   </property>
+   <item>
+    <layout class="QHBoxLayout" name="headerLayout">
+     <item>
+      <widget class="QLabel" name="titleLabel">
+       <property name="text">
+        <string>跨模态绑定管理</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="headerSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="statusLabel">
+       <property name="text">
+        <string/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="refreshButton">
+       <property name="text">
+        <string>刷新</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QSplitter" name="mainSplitter">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <widget class="QGroupBox" name="anchorGroup">
+      <property name="title">
+       <string>文档 Anchor</string>
+      </property>
+      <layout class="QVBoxLayout" name="anchorGroupLayout">
+       <item>
+        <widget class="QLineEdit" name="anchorFilterEdit">
+         <property name="placeholderText">
+          <string>筛选文件、anchor_id、标题、内容</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="anchorTable"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QGroupBox" name="clipGroup">
+      <property name="title">
+       <string>视频 Clip</string>
+      </property>
+      <layout class="QVBoxLayout" name="clipGroupLayout">
+       <item>
+        <widget class="QLineEdit" name="clipFilterEdit">
+         <property name="placeholderText">
+          <string>筛选视频、摘要、clip_id</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="clipTable"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QGroupBox" name="bindingGroup">
+      <property name="title">
+       <string>绑定记录</string>
+      </property>
+      <layout class="QVBoxLayout" name="bindingGroupLayout">
+       <item>
+        <widget class="QLineEdit" name="bindingFilterEdit">
+         <property name="placeholderText">
+          <string>筛选视频、摘要、anchor、状态</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="bindingTable"/>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="bindingActionsLayout">
+         <item>
+          <widget class="QPushButton" name="bindSelectedButton">
+           <property name="text">
+            <string>绑定选中</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="repairSelectedButton">
+           <property name="text">
+            <string>修复到选中 Anchor</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="deleteBindingButton">
+           <property name="text">
+            <string>删除绑定</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="bindingActionsSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

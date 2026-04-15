@@ -83,6 +83,9 @@ class MetadataExporter:
             "heading_path": str(chunk.get("heading_path", "")),
             "block_type": str(chunk.get("block_type", "text")),
             "content": str(chunk.get("content", "")),
+            "display_content": str(chunk.get("display_content", chunk.get("content", ""))),
+            "embedding_text": str(chunk.get("embedding_text", chunk.get("content", ""))),
+            "metadata": MetadataExporter._json_safe(chunk.get("metadata", {})),
             "vector_dim": chunk.get("vector_dim"),
             "stored": bool(chunk.get("stored", False)),
             "is_manual": bool(chunk.get("is_manual", False)),
@@ -111,8 +114,10 @@ class MetadataExporter:
         ]
 
         for index, chunk in enumerate(payload["chunks"], start=1):
-            content = str(chunk.get("content", ""))
-            fence = "````" if "```" in content else "```"
+            display_content = str(chunk.get("display_content", chunk.get("content", "")))
+            embedding_text = str(chunk.get("embedding_text", chunk.get("content", "")))
+            semantic_description = str((chunk.get("metadata", {}) or {}).get("semantic_description", ""))
+            fence = "````" if "```" in display_content else "```"
             heading_path = chunk.get("heading_path", "")
             block_type = chunk.get("block_type", "text")
             meta_lines = [
@@ -125,17 +130,33 @@ class MetadataExporter:
             ]
             if heading_path:
                 meta_lines.append(f"- heading_path: {heading_path}")
+            if semantic_description:
+                meta_lines.append(f"- semantic_description: {semantic_description}")
             lines.extend(
                 [
                     f"## Chunk {index}",
                     "",
                     *meta_lines,
                     "",
+                    "### Display Content",
+                    "",
                     f"{fence}text",
-                    content,
+                    display_content,
                     fence,
                     "",
                 ]
             )
+            if embedding_text and embedding_text != display_content:
+                embedding_fence = "````" if "```" in embedding_text else "```"
+                lines.extend(
+                    [
+                        "### Embedding Text",
+                        "",
+                        f"{embedding_fence}text",
+                        embedding_text,
+                        embedding_fence,
+                        "",
+                    ]
+                )
 
         return "\n".join(lines)

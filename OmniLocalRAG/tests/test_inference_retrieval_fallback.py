@@ -5,6 +5,8 @@ import types
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 class DummySignal:
     def __init__(self, *args, **kwargs):
@@ -20,12 +22,14 @@ class DummyQThread:
 
 
 class FakeEmbedManager:
+    is_loaded = False
+
     def encode(self, texts):
         return [[0.1, 0.2]]
 
 
 class FakeChromaStore:
-    def query(self, embedding, n_results=5):
+    def query(self, embedding, n_results=5, query_text="", query_sparse=None):
         return [
             {
                 "id": "vec-1",
@@ -38,6 +42,7 @@ class FakeChromaStore:
 class FakeLLMManager:
     load_called = False
     last_error = "should not load"
+    is_loaded = False
 
     def load(self):
         self.__class__.load_called = True

@@ -1,0 +1,90 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PreferencesDialog</class>
+ <widget class="QDialog" name="PreferencesDialog">
+  <property name="windowTitle"><string>偏好设置</string></property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="leftMargin"><number>14</number></property>
+   <property name="topMargin"><number>14</number></property>
+   <property name="rightMargin"><number>14</number></property>
+   <property name="bottomMargin"><number>10</number></property>
+   <property name="spacing"><number>10</number></property>
+   <item>
+    <widget class="QTabWidget" name="tabWidget">
+     <widget class="QWidget" name="serverTab"><attribute name="title"><string>llama-server</string></attribute><layout class="QFormLayout" name="serverFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="serverDirLabel"><property name="text"><string>llama-server 目录:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QWidget" name="serverDirRowWidget"><layout class="QHBoxLayout" name="serverDirRowLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property><item><widget class="QLineEdit" name="serverDirEdit"/></item><item><widget class="QPushButton" name="browseServerDirButton"><property name="text"><string>浏览…</string></property></widget></item></layout></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="serverModelPathLabel"><property name="text"><string>GGUF 模型文件:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QWidget" name="serverModelRowWidget"><layout class="QHBoxLayout" name="serverModelRowLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property><item><widget class="QLineEdit" name="serverModelPathEdit"/></item><item><widget class="QPushButton" name="browseServerModelButton"><property name="text"><string>浏览…</string></property></widget></item></layout></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="serverHostLabel"><property name="text"><string>监听地址:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QLineEdit" name="serverHostEdit"/></item>
+      <item row="3" column="0"><widget class="QLabel" name="serverPortLabel"><property name="text"><string>监听端口:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QSpinBox" name="serverPortSpin"/></item>
+      <item row="4" column="0"><widget class="QLabel" name="serverGpuLayersLabel"><property name="text"><string>GPU 层数:</string></property></widget></item>
+      <item row="4" column="1"><widget class="QSpinBox" name="serverGpuLayersSpin"/></item>
+      <item row="5" column="0"><widget class="QLabel" name="serverCtxSizeLabel"><property name="text"><string>上下文长度:</string></property></widget></item>
+      <item row="5" column="1"><widget class="QSpinBox" name="serverCtxSizeSpin"/></item>
+      <item row="6" column="1"><widget class="QCheckBox" name="serverFlashAttnCheck"><property name="text"><string>启用 Flash Attention</string></property></widget></item>
+      <item row="7" column="1"><widget class="QCheckBox" name="serverNoMmapCheck"><property name="text"><string>禁用内存映射</string></property></widget></item>
+      <item row="8" column="0"><widget class="QLabel" name="serverNumaLabel"><property name="text"><string>NUMA 策略:</string></property></widget></item>
+      <item row="8" column="1"><widget class="QComboBox" name="serverNumaCombo"/></item>
+      <item row="9" column="0"><widget class="QLabel" name="serverExtraArgsLabel"><property name="text"><string>额外参数:</string></property></widget></item>
+      <item row="9" column="1"><widget class="QLineEdit" name="serverExtraArgsEdit"/></item>
+      <item row="10" column="1"><widget class="QCheckBox" name="serverAutoDownloadCheck"><property name="text"><string>缺少二进制时自动下载</string></property></widget></item>
+     </layout></widget>
+     <widget class="QWidget" name="llmTab"><attribute name="title"><string>LLM 推理</string></attribute><layout class="QFormLayout" name="llmFormLayout">
+      <item row="0" column="1"><widget class="QCheckBox" name="llmEnabledCheck"><property name="text"><string>启用 LLM 推理</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="llmModelPathLabel"><property name="text"><string>GGUF 模型文件:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QWidget" name="llmModelRowWidget"><layout class="QHBoxLayout" name="llmModelRowLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property><item><widget class="QLineEdit" name="llmModelPathEdit"/></item><item><widget class="QPushButton" name="browseLlmModelButton"><property name="text"><string>浏览…</string></property></widget></item></layout></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="llmGpuLayersLabel"><property name="text"><string>GPU 层数:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QSpinBox" name="llmGpuLayersSpin"/></item>
+      <item row="3" column="0"><widget class="QLabel" name="llmNCtxLabel"><property name="text"><string>上下文长度:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QSpinBox" name="llmNCtxSpin"/></item>
+      <item row="4" column="0"><widget class="QLabel" name="llmMaxTokensLabel"><property name="text"><string>最大输出 token:</string></property></widget></item>
+      <item row="4" column="1"><widget class="QSpinBox" name="llmMaxTokensSpin"/></item>
+      <item row="5" column="0"><widget class="QLabel" name="llmTemperatureLabel"><property name="text"><string>Temperature:</string></property></widget></item>
+      <item row="5" column="1"><widget class="QDoubleSpinBox" name="llmTemperatureSpin"/></item>
+      <item row="6" column="0"><widget class="QLabel" name="llmRepeatPenaltyLabel"><property name="text"><string>Repeat penalty:</string></property></widget></item>
+      <item row="6" column="1"><widget class="QDoubleSpinBox" name="llmRepeatPenaltySpin"/></item>
+      <item row="7" column="0"><widget class="QLabel" name="idleTimeoutLabel"><property name="text"><string>空闲卸载超时:</string></property></widget></item>
+      <item row="7" column="1"><widget class="QSpinBox" name="idleTimeoutSpin"/></item>
+     </layout></widget>
+     <widget class="QWidget" name="embedTab"><attribute name="title"><string>嵌入模型</string></attribute><layout class="QFormLayout" name="embedFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="embedModelPathLabel"><property name="text"><string>模型目录:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="embedModelPathEdit"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="embedDeviceLabel"><property name="text"><string>运行设备:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QComboBox" name="embedDeviceCombo"/></item>
+     </layout></widget>
+     <widget class="QWidget" name="retrievalTab"><attribute name="title"><string>检索</string></attribute><layout class="QFormLayout" name="retrievalFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="topKLabel"><property name="text"><string>Top-K:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QSpinBox" name="topKSpin"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="distanceThresholdLabel"><property name="text"><string>距离阈值:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QDoubleSpinBox" name="distanceThresholdSpin"/></item>
+     </layout></widget>
+     <widget class="QWidget" name="uiTab"><attribute name="title"><string>界面 / 热键</string></attribute><layout class="QFormLayout" name="uiFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="hotkeyLabel"><property name="text"><string>全局热键:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="hotkeyEdit"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="windowWidthLabel"><property name="text"><string>搜索窗口宽度:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="windowWidthSpin"/></item>
+      <item row="2" column="0"><widget class="QLabel" name="windowOpacityLabel"><property name="text"><string>窗口透明度:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QDoubleSpinBox" name="windowOpacitySpin"/></item>
+      <item row="3" column="0"><widget class="QLabel" name="animationMsLabel"><property name="text"><string>动画时长:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QSpinBox" name="animationMsSpin"/></item>
+     </layout></widget>
+     <widget class="QWidget" name="chunkingTab"><attribute name="title"><string>分块参数</string></attribute><layout class="QFormLayout" name="chunkingFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="maxCharsLabel"><property name="text"><string>最大 chunk 长度:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QSpinBox" name="maxCharsSpin"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="overlapCharsLabel"><property name="text"><string>重叠长度:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="overlapCharsSpin"/></item>
+      <item row="2" column="0"><widget class="QLabel" name="minSectionCharsLabel"><property name="text"><string>最小段落长度:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QSpinBox" name="minSectionCharsSpin"/></item>
+      <item row="3" column="1"><widget class="QCheckBox" name="keepHeadingPathCheck"><property name="text"><string>在 chunk 前缀中保留 heading 路径</string></property></widget></item>
+     </layout></widget>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>VideoPlayerDialog</class>
+ <widget class="QDialog" name="VideoPlayerDialog">
+  <property name="windowTitle"><string>视频播放</string></property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+   <item><widget class="QWidget" name="videoHostWidget"><layout class="QVBoxLayout" name="videoHostLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+   <item><layout class="QHBoxLayout" name="controlsLayout"><item><widget class="QPushButton" name="playButton"><property name="text"><string>▶</string></property></widget></item><item><widget class="QSlider" name="seekBar"><property name="orientation"><enum>Qt::Horizontal</enum></property></widget></item><item><widget class="QPushButton" name="fullscreenButton"><property name="text"><string>⛶</string></property></widget></item></layout></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

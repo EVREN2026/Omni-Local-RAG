@@ -4,26 +4,8 @@
 #   pyinstaller OmniLocal.spec --noconfirm
 #   OR double-click build.bat
 
-import importlib.util
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
-
-# ---------------------------------------------------------------------------
-# Locate llama_cpp runtime DLLs (libllama.dll, llama.dll, ggml.dll)
-# Works in both venv and system Python (site.getsitepackages() is absent
-# in some venv configurations).
-# ---------------------------------------------------------------------------
-_llama_cpp_dir = None
-_spec = importlib.util.find_spec("llama_cpp")
-if _spec and _spec.submodule_search_locations:
-    _llama_cpp_dir = Path(list(_spec.submodule_search_locations)[0])
-
-_llama_binaries = []
-if _llama_cpp_dir:
-    for _dll in ("libllama.dll", "llama.dll", "ggml.dll", "ggml_shared.dll"):
-        _dll_path = _llama_cpp_dir / _dll
-        if _dll_path.exists():
-            _llama_binaries.append((str(_dll_path), "."))
 
 # ---------------------------------------------------------------------------
 # Data files from third-party packages
@@ -73,8 +55,6 @@ hidden_imports = [
     "transformers",
     "huggingface_hub",
     "tokenizers",
-    # llama_cpp
-    "llama_cpp",
     # PyTorch
     "torch",
     "torch.nn",
@@ -109,7 +89,7 @@ _icon_path = Path("assets/icons/app.ico")
 a = Analysis(
     ["main.py"],
     pathex=["."],
-    binaries=_llama_binaries,
+    binaries=[],
     datas=[
         ("assets/", "assets/"),
         ("config.json", "."),

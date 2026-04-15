@@ -72,6 +72,35 @@ class FakeVectors:
         return self.values
 
 
+class FakeBGEM3FlagModel:
+    loaded_devices = []
+    loaded_use_fp16 = []
+
+    def __init__(self, model_path, use_fp16=False, devices=None):
+        self.model_path = model_path
+        self.device = devices or "cpu"
+        self.__class__.loaded_devices.append(self.device)
+        self.__class__.loaded_use_fp16.append(bool(use_fp16))
+
+    def encode(
+        self,
+        texts,
+        batch_size=12,
+        max_length=8192,
+        return_dense=True,
+        return_sparse=False,
+        return_colbert_vecs=False,
+    ):
+        dense = FakeVectors([[1.0, 0.0] for _ in texts]) if return_dense else None
+        sparse = [{"10": 0.9, "20": 0.1} for _ in texts] if return_sparse else None
+        colbert = [FakeVectors([[0.1, 0.2]]) for _ in texts] if return_colbert_vecs else None
+        return {
+            "dense_vecs": dense,
+            "lexical_weights": sparse,
+            "colbert_vecs": colbert,
+        }
+
+
 class LegacySentenceTransformer:
     loaded_devices = []
 
@@ -111,6 +140,7 @@ class EmbedManagerDeviceTest(unittest.TestCase):
         fake_sentence_transformers.SentenceTransformer = FakeSentenceTransformer
         self.old_sentence_transformers = sys.modules.get("sentence_transformers")
         sys.modules["sentence_transformers"] = fake_sentence_transformers
+        self.old_flag_embedding = sys.modules.get("FlagEmbedding")
 
         self.embed_manager = importlib.import_module("app.models.embed_manager")
         self.old_instance = self.embed_manager.EmbedManager._instance
@@ -126,6 +156,8 @@ class EmbedManagerDeviceTest(unittest.TestCase):
         FakeSentenceTransformer.loaded_kwargs = []
         FakeSentenceTransformer.fail_cuda_load_once = False
         FakeSentenceTransformer.fail_cuda_encode_once = False
+        FakeBGEM3FlagModel.loaded_devices = []
+        FakeBGEM3FlagModel.loaded_use_fp16 = []
 
     def tearDown(self):
         self.embed_manager.EmbedManager._instance = self.old_instance
@@ -137,6 +169,7 @@ class EmbedManagerDeviceTest(unittest.TestCase):
         self.cfg._cache = self.old_cache
         self._restore_module("torch", self.old_torch)
         self._restore_module("sentence_transformers", self.old_sentence_transformers)
+        self._restore_module("FlagEmbedding", self.old_flag_embedding)
         self.temp_dir.cleanup()
 
     def test_unsupported_cuda_architecture_falls_back_to_cpu(self):
@@ -198,6 +231,26 @@ class EmbedManagerDeviceTest(unittest.TestCase):
             self.assertEqual(LegacySentenceTransformer.loaded_devices, ["cpu"])
         finally:
             self._restore_module("sentence_transformers", old)
+
+    def test_flagembedding_backend_is_used_when_available(self):
+        fake_flag_embedding = types.ModuleType("FlagEmbedding")
+        fake_flag_embedding.BGEM3FlagModel = FakeBGEM3FlagModel
+        sys.modules["FlagEmbedding"] = fake_flag_embedding
+        self.embed_manager.EmbedManager._instance = None
+        self.embed_manager.EmbedManager._model = None
+
+        manager = self.embed_manager.EmbedManager()
+
+        self.assertTrue(manager.load())
+        payloads = manager.encode_payloads(["hello"], return_sparse=True, return_colbert=True)
+
+        self.assertEqual(manager.backend, "flagembedding")
+        self.assertTrue(manager.supports_sparse)
+        self.assertEqual(FakeBGEM3FlagModel.loaded_devices, ["cpu"])
+        self.assertEqual(FakeBGEM3FlagModel.loaded_use_fp16, [False])
+        self.assertEqual(payloads[0]["dense"], [1.0, 0.0])
+        self.assertEqual(payloads[0]["sparse"], {"10": 0.9, "20": 0.1})
+        self.assertEqual(payloads[0]["colbert"], [[0.1, 0.2]])
 
     @staticmethod
     def _restore_module(name, old_module):

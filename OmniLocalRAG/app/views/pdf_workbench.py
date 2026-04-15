@@ -1,28 +1,16 @@
-"""PDFWorkbench — PDF/source view plus converted Markdown correction editor."""
-
-import re
+﻿import re
 from pathlib import Path
 from typing import Optional
 
 from PyQt5.QtCore import QEvent, QPoint, QRect, Qt, pyqtSignal
-from PyQt5.QtGui import QPainter, QPen, QPixmap, QColor, QFont
-from PyQt5.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QScrollArea,
-    QSplitter,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-    QSpinBox,
-)
+from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PyQt5.QtWidgets import QLabel, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTextEdit, QWidget
 
 from app.controllers.ingest_controller import IngestController
 from app.controllers.search_controller import SearchController
 from app.utils import config as cfg
 from app.utils.logger import logger
+from app.utils.ui_loader import load_ui, require_child
 
 
 class PDFWorkbench(QWidget):
@@ -36,121 +24,65 @@ class PDFWorkbench(QWidget):
         self._ingest = ingest_ctrl
         self._search = search_ctrl
         self._current_file: Optional[str] = None
-        self._total_pages: int = 0
-        self._current_page: int = 0
-        self._fitz_doc = None               # cached fitz.Document
-        self._zoom_factor: float = 1.0
-        self._fit_page_enabled: bool = True
+        self._total_pages = 0
+        self._current_page = 0
+        self._fitz_doc = None
+        self._zoom_factor = 1.0
+        self._fit_page_enabled = True
         self._build()
 
-    # ------------------------------------------------------------------
-    # Build UI
-    # ------------------------------------------------------------------
-
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(4, 4, 4, 4)
-        root.setSpacing(4)
+        load_ui(self, "pdf_workbench.ui")
 
-        # Top toolbar
-        tb = QHBoxLayout()
-        self._file_label = QLabel("未加载文件")
+        self._file_label = require_child(self, QLabel, "fileLabel", "PDFWorkbench UI")
+        self._save_full_btn = require_child(self, QPushButton, "saveMarkdownButton", "PDFWorkbench UI")
+        self._prev_btn = require_child(self, QPushButton, "prevPageButton", "PDFWorkbench UI")
+        self._next_btn = require_child(self, QPushButton, "nextPageButton", "PDFWorkbench UI")
+        self._page_spin = require_child(self, QSpinBox, "pageSpin", "PDFWorkbench UI")
+        self._page_total_lbl = require_child(self, QLabel, "pageTotalLabel", "PDFWorkbench UI")
+        self._zoom_out_btn = require_child(self, QPushButton, "zoomOutButton", "PDFWorkbench UI")
+        self._zoom_in_btn = require_child(self, QPushButton, "zoomInButton", "PDFWorkbench UI")
+        self._actual_size_btn = require_child(self, QPushButton, "actualSizeButton", "PDFWorkbench UI")
+        self._fit_page_btn = require_child(self, QPushButton, "fitPageButton", "PDFWorkbench UI")
+        self._zoom_label = require_child(self, QLabel, "zoomLabel", "PDFWorkbench UI")
+        self._pdf_scroll = require_child(self, QScrollArea, "pdfScroll", "PDFWorkbench UI")
+        self._md_editor = require_child(self, QTextEdit, "markdownEditor", "PDFWorkbench UI")
+
         self._file_label.setStyleSheet("color: #aaa; font-size: 11px;")
-        tb.addWidget(self._file_label)
-        tb.addStretch()
-        self._save_full_btn = QPushButton("保存 Markdown")
-        self._save_full_btn.setToolTip("保存转换后的 Markdown，并生成 PDF 页图到关联目录")
-        self._save_full_btn.clicked.connect(self._save_full_markdown)
-        tb.addWidget(self._save_full_btn)
-        root.addLayout(tb)
-
-        # Two-pane splitter: PDF source + raw Markdown correction.
-        splitter = QSplitter(Qt.Horizontal)
-
-        # ── Pane 1: PDF viewer ──────────────────────────────────────
-        pdf_pane = QWidget()
-        pdf_layout = QVBoxLayout(pdf_pane)
-        pdf_layout.setContentsMargins(0, 0, 0, 0)
-        pdf_layout.setSpacing(2)
-
-        nav_row = QHBoxLayout()
-        self._prev_btn = QPushButton("◀")
-        self._prev_btn.setFixedWidth(32)
-        self._prev_btn.clicked.connect(self._prev_page)
-        self._next_btn = QPushButton("▶")
-        self._next_btn.setFixedWidth(32)
-        self._next_btn.clicked.connect(self._next_page)
-        self._page_spin = QSpinBox()
         self._page_spin.setMinimum(1)
         self._page_spin.setMaximum(1)
         self._page_spin.setFixedWidth(60)
-        self._page_spin.valueChanged.connect(self._on_page_spin)
-        self._page_total_lbl = QLabel("/ 1")
-        nav_row.addWidget(self._prev_btn)
-        nav_row.addWidget(self._page_spin)
-        nav_row.addWidget(self._page_total_lbl)
-        nav_row.addWidget(self._next_btn)
-        self._zoom_out_btn = QPushButton("-")
+        self._prev_btn.setFixedWidth(32)
+        self._next_btn.setFixedWidth(32)
         self._zoom_out_btn.setFixedWidth(28)
-        self._zoom_out_btn.clicked.connect(self._zoom_out)
-        self._zoom_in_btn = QPushButton("+")
         self._zoom_in_btn.setFixedWidth(28)
-        self._zoom_in_btn.clicked.connect(self._zoom_in)
-        self._actual_size_btn = QPushButton("100%")
-        self._actual_size_btn.clicked.connect(self._actual_size)
-        self._fit_page_btn = QPushButton("适应整页")
-        self._fit_page_btn.clicked.connect(self._fit_page)
-        self._zoom_label = QLabel("适应整页")
         self._zoom_label.setStyleSheet("color: #aaa;")
-        nav_row.addWidget(self._zoom_out_btn)
-        nav_row.addWidget(self._zoom_in_btn)
-        nav_row.addWidget(self._actual_size_btn)
-        nav_row.addWidget(self._fit_page_btn)
-        nav_row.addWidget(self._zoom_label)
-        nav_row.addStretch()
-        pdf_layout.addLayout(nav_row)
 
-        self._pdf_scroll = QScrollArea()
         self._pdf_label = _SelectablePDFLabel()
         self._pdf_label.selection_changed.connect(self._on_pdf_selection)
         self._pdf_scroll.setWidget(self._pdf_label)
         self._pdf_scroll.setWidgetResizable(False)
         self._pdf_scroll.viewport().installEventFilter(self)
-        pdf_layout.addWidget(self._pdf_scroll)
-        splitter.addWidget(pdf_pane)
 
-        # ── Pane 2: Markdown editor ─────────────────────────────────
-        md_pane = QWidget()
-        md_layout = QVBoxLayout(md_pane)
-        md_layout.setContentsMargins(0, 0, 0, 0)
-        md_layout.setSpacing(2)
-
-        md_header = QLabel("Markdown 全文编辑")
-        md_header.setStyleSheet("font-weight: bold; padding: 2px;")
-        md_layout.addWidget(md_header)
-
-        self._md_editor = QTextEdit()
-        self._md_editor.setPlaceholderText("加载文件后此处显示解析出的 Markdown 全文，可直接编辑…")
         mono = QFont("Consolas", 10)
         mono.setStyleHint(QFont.Monospace)
         self._md_editor.setFont(mono)
-        md_layout.addWidget(self._md_editor)
-        splitter.addWidget(md_pane)
 
-        splitter.setSizes([520, 680])
-        root.addWidget(splitter)
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        self._save_full_btn.clicked.connect(self._save_full_markdown)
+        self._prev_btn.clicked.connect(self._prev_page)
+        self._next_btn.clicked.connect(self._next_page)
+        self._page_spin.valueChanged.connect(self._on_page_spin)
+        self._zoom_out_btn.clicked.connect(self._zoom_out)
+        self._zoom_in_btn.clicked.connect(self._zoom_in)
+        self._actual_size_btn.clicked.connect(self._actual_size)
+        self._fit_page_btn.clicked.connect(self._fit_page)
 
     def load_file(self, file_path: str) -> None:
-        """Load a PDF file: render page 1 and populate the Markdown editor."""
         self._current_file = file_path
         self._file_label.setText(Path(file_path).name)
-        # Open fitz doc and cache
         try:
             import fitz  # type: ignore
+
             if self._fitz_doc:
                 self._fitz_doc.close()
             self._fitz_doc = fitz.open(file_path)
@@ -158,9 +90,9 @@ class PDFWorkbench(QWidget):
         except ImportError:
             self._fitz_doc = None
             self._total_pages = 0
-            logger.warning("PyMuPDF not available — PDF rendering disabled")
-        except Exception as e:
-            logger.error(f"PDF open error: {e}")
+            logger.warning("PyMuPDF not available - PDF rendering disabled")
+        except Exception as exc:
+            logger.error(f"PDF open error: {exc}")
             self._fitz_doc = None
             self._total_pages = 0
 
@@ -184,13 +116,9 @@ class PDFWorkbench(QWidget):
             return
         self._md_editor.clear()
 
-    # ------------------------------------------------------------------
-    # Page navigation
-    # ------------------------------------------------------------------
-
     def _prev_page(self) -> None:
         if self._current_page > 0:
-            self._page_spin.setValue(self._current_page)  # triggers _on_page_spin
+            self._page_spin.setValue(self._current_page)
 
     def _next_page(self) -> None:
         if self._current_page < self._total_pages - 1:
@@ -231,12 +159,13 @@ class PDFWorkbench(QWidget):
 
     def _render_page(self, page_num: int) -> None:
         if not self._fitz_doc:
-            self._pdf_label.setText("需安装 PyMuPDF (fitz) 才能渲染 PDF")
+            self._pdf_label.setText("需要安装 PyMuPDF (fitz) 才能渲染 PDF")
             return
         if page_num < 0 or page_num >= self._total_pages:
             return
         try:
             import fitz  # type: ignore
+
             page = self._fitz_doc[page_num]
             scale = self._effective_scale(page)
             mat = fitz.Matrix(scale, scale)
@@ -250,66 +179,39 @@ class PDFWorkbench(QWidget):
                 self._zoom_label.setText("适应整页")
             else:
                 self._zoom_label.setText(f"{int(scale * 100)}%")
-        except Exception as e:
-            logger.error(f"PDF render error: {e}")
-
-    # ------------------------------------------------------------------
-    # Rubber-band → chunk selection
-    # ------------------------------------------------------------------
+        except Exception as exc:
+            logger.error(f"PDF render error: {exc}")
 
     def _on_pdf_selection(self, rect: QRect) -> None:
-        """Map the rubber-band selection rect on the PDF label to text in the
-        Markdown editor and scroll to the nearest matching line.
-
-        Strategy:
-        1. Convert the pixel rect to PDF-coordinate space (points).
-        2. Ask PyMuPDF for words inside that bbox.
-        3. Build a search phrase from the found words.
-        4. Use QTextEdit.find() to locate and scroll to the phrase.
-        """
         if not self._fitz_doc or not self._current_page < self._total_pages:
             return
         if rect.width() < 5 or rect.height() < 5:
-            return  # ignore accidental tiny clicks
-
+            return
         try:
             import fitz  # type: ignore
+            from PyQt5.QtGui import QTextCursor
+
             page = self._fitz_doc[self._current_page]
             scale = self._effective_scale(page)
             if scale <= 0:
                 return
 
-            # Convert pixel rect → PDF points
-            x0 = rect.left()   / scale
-            y0 = rect.top()    / scale
-            x1 = rect.right()  / scale
-            y1 = rect.bottom() / scale
-            bbox = fitz.Rect(x0, y0, x1, y1)
-
-            # Extract words inside the selection (each word: x0,y0,x1,y1,text,…)
+            bbox = fitz.Rect(rect.left() / scale, rect.top() / scale, rect.right() / scale, rect.bottom() / scale)
             words = page.get_text("words", clip=bbox)
             if not words:
                 return
-
-            phrase = " ".join(w[4] for w in words[:12])   # at most 12 words for searching
+            phrase = " ".join(word[4] for word in words[:12])
             if not phrase.strip():
                 return
-
-            # Scroll the Markdown editor to the first occurrence
-            # Reset cursor to top first so find() searches from the beginning
-            from PyQt5.QtGui import QTextCursor
             self._md_editor.moveCursor(QTextCursor.Start)
             found = self._md_editor.find(phrase)
             if not found:
-                # Fallback: try with the first 3 words only
                 short = " ".join(phrase.split()[:3])
                 self._md_editor.moveCursor(QTextCursor.Start)
                 self._md_editor.find(short)
-            # Ensure the found position is scrolled into view
             self._md_editor.ensureCursorVisible()
-
-        except Exception as e:
-            logger.debug(f"PDF selection mapping failed: {e}")
+        except Exception as exc:
+            logger.debug(f"PDF selection mapping failed: {exc}")
 
     def eventFilter(self, watched, event):
         if (
@@ -322,34 +224,23 @@ class PDFWorkbench(QWidget):
             self._render_page(self._current_page)
         return super().eventFilter(watched, event)
 
-    # ------------------------------------------------------------------
-    # Save actions
-    # ------------------------------------------------------------------
-
     def _save_full_markdown(self) -> None:
-        """Write corrected raw markdown and page images."""
         if not self._current_file:
             QMessageBox.warning(self, "提示", "请先加载一个 PDF 文件")
             return
         full_text = self._md_editor.toPlainText().strip()
         if not full_text:
             return
-
         try:
             md_path = self._converted_md_path(self._current_file)
             md_path.parent.mkdir(parents=True, exist_ok=True)
             md_path.write_text(full_text + "\n", encoding="utf-8")
-
             img_dir = self._export_page_images()
-            logger.info(f"PDFWorkbench: markdown save OK — md={md_path.name}, images={img_dir}")
-            QMessageBox.information(
-                self,
-                "完成",
-                f"Markdown: {md_path}\n页图目录: {img_dir}",
-            )
-        except Exception as e:
-            logger.error(f"PDFWorkbench full save failed: {e}", exc_info=True)
-            QMessageBox.critical(self, "错误", f"保存失败:\n{e}")
+            logger.info(f"PDFWorkbench: markdown save OK - md={md_path.name}, images={img_dir}")
+            QMessageBox.information(self, "完成", f"Markdown: {md_path}\n页图目录: {img_dir}")
+        except Exception as exc:
+            logger.error(f"PDFWorkbench full save failed: {exc}", exc_info=True)
+            QMessageBox.critical(self, "错误", f"保存失败:\n{exc}")
 
     def _converted_md_path(self, source_file: str) -> Path:
         root = Path(cfg.get("exports.path", "data/exports"))
@@ -358,8 +249,6 @@ class PDFWorkbench(QWidget):
 
     @staticmethod
     def _safe_export_stem(source_file: str) -> str:
-        # Keep consistent with app.workers.ingest_worker._safe_export_stem.
-        # Non-ASCII-only names are normalized to "document" in the ingest flow.
         stem = Path(source_file).stem or "pdf"
         return re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._") or "document"
 
@@ -369,6 +258,7 @@ class PDFWorkbench(QWidget):
         if not self._current_file:
             raise RuntimeError("未加载 PDF 文件")
         import fitz  # type: ignore
+
         img_dir = self._converted_md_path(self._current_file).with_name(
             f"{self._safe_export_stem(self._current_file)}_images"
         )
@@ -380,10 +270,6 @@ class PDFWorkbench(QWidget):
             pix.save(str(out))
         return img_dir
 
-
-# ---------------------------------------------------------------------------
-# Rubber-band PDF label
-# ---------------------------------------------------------------------------
 
 class _SelectablePDFLabel(QLabel):
     selection_changed = pyqtSignal(QRect)

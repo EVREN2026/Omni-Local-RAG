@@ -12,6 +12,7 @@ class SearchController(QObject):
 
     context_ready = pyqtSignal(list)
     token_ready = pyqtSignal(str)
+    timings_ready = pyqtSignal(dict)
     search_finished = pyqtSignal(bool)
     error_occurred = pyqtSignal(str)
 
@@ -29,6 +30,7 @@ class SearchController(QObject):
 
         self._worker = InferenceWorker(query)
         self._worker.context_retrieved.connect(self._on_context)
+        self._worker.timings_ready.connect(self.timings_ready)
         self._worker.token_generated.connect(self.token_ready)
         self._worker.generation_finished.connect(self.search_finished)
         self._worker.error_occurred.connect(self.error_occurred)

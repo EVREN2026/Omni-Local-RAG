@@ -1,195 +1,187 @@
-"""
-result_cards.py — factory + widget classes for PDF and Video result cards.
-"""
-import os
-from pathlib import Path
+﻿from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QSizePolicy,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import QFrame, QLabel, QSizePolicy, QWidget
 
-from app.utils import config as cfg
-from app.utils.logger import logger
-
-_THUMB_DIR = cfg.abs_path("data/thumbs")
+from app.utils.ui_loader import load_ui, require_child
 
 
 def build_card(result: dict, parent: Optional[QWidget] = None) -> Optional[QWidget]:
-    """Factory: returns the correct card widget based on source_type."""
-    source_type = result.get("source_type", "")
-    if source_type == "pdf":
-        return PDFCard(result, parent)
-    if source_type == "video":
-        return VideoCard(result, parent)
-    if source_type == "hybrid":
-        return HybridCard(result, parent)
-    return None
+    return SearchResultCard(result, parent)
 
 
-# ---------------------------------------------------------------------------
-# PDFCard
-# ---------------------------------------------------------------------------
+def _payload(result: dict) -> dict:
+    payload = result.get("pdf_payload") or {}
+    return payload if isinstance(payload, dict) else {}
 
-class PDFCard(QFrame):
+
+class SearchResultCard(QFrame):
+    clicked = pyqtSignal()
+
     def __init__(self, data: dict, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setObjectName("PDFCard")
-        self.setFrameShape(QFrame.StyledPanel)
         self._data = data
+        self.setObjectName("ResultListCard")
+        self.setProperty("selected", False)
+        self.setProperty("bestMatch", False)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._build()
 
     def _build(self) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
+        load_ui(self, "search_result_card.ui")
+        self._title = require_child(self, QLabel, "titleLabel", "SearchResultCard UI")
+        self._tag = require_child(self, QLabel, "sourceTagLabel", "SearchResultCard UI")
+        self._meta = require_child(self, QLabel, "metaLabel", "SearchResultCard UI")
+        self._summary = require_child(self, QLabel, "summaryLabel", "SearchResultCard UI")
 
-        # Thumbnail (lazy: show placeholder, load on show)
-        self._thumb = QLabel()
-        self._thumb.setFixedSize(120, 90)
-        self._thumb.setObjectName("CardThumb")
-        self._thumb.setAlignment(Qt.AlignCenter)
-        self._thumb.setText("PDF")
-        layout.addWidget(self._thumb)
+        self._title.setObjectName("ResultListTitle")
+        self._tag.setObjectName("ResultSourceTag")
+        self._meta.setObjectName("ResultMeta")
+        self._summary.setObjectName("ResultSummary")
 
-        # Text info
-        info = QVBoxLayout()
-        pdf_payload = self._data.get("pdf_payload") or {}
-        file_name = pdf_payload.get("file", "")
-        page = pdf_payload.get("page", "")
-        content = self._data.get("document", "")[:400]
+        self._title.setText(_result_title(self._data))
+        self._tag.setText(_result_source_tag(self._data))
+        meta_text = _result_meta(self._data)
+        self._meta.setText(meta_text)
+        self._meta.setVisible(bool(meta_text))
 
-        title = QLabel(f"{file_name}  第 {page} 页")
-        title.setObjectName("CardTitle")
-        title.setWordWrap(True)
+        # Breadcrumb: show full heading_path as tooltip and truncated label
+        breadcrumb = _result_breadcrumb(self._data)
+        if breadcrumb:
+            self._title.setToolTip(breadcrumb)
+            self._meta.setToolTip(breadcrumb)
 
-        body = QLabel(content)
-        body.setObjectName("CardBody")
-        body.setWordWrap(True)
-        body.setMaximumHeight(80)
+        self._summary.setText(_result_summary(self._data))
 
-        info.addWidget(title)
-        info.addWidget(body)
-        info.addStretch()
-        layout.addLayout(info)
+    def set_selected(self, selected: bool) -> None:
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
 
-    def mouseDoubleClickEvent(self, event) -> None:
-        pdf_payload = self._data.get("pdf_payload") or {}
-        file_name = pdf_payload.get("file", "")
-        page = pdf_payload.get("page", 1)
-        file_path = cfg.abs_path(f"data/{file_name}")
-        if not file_path.exists():
-            # Try absolute path stored in payload
-            file_path = Path(file_name)
-        try:
-            os.startfile(str(file_path))
-        except Exception as e:
-            logger.error(f"Open PDF failed: {e}")
-        super().mouseDoubleClickEvent(event)
+    def set_best_match(self, best_match: bool) -> None:
+        self.setProperty("bestMatch", best_match)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
 
-
-# ---------------------------------------------------------------------------
-# VideoCard
-# ---------------------------------------------------------------------------
-
-class VideoCard(QFrame):
-    def __init__(self, data: dict, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("VideoCard")
-        self.setFrameShape(QFrame.StyledPanel)
-        self._data = data
-        self._player_widget = None
-        self._build()
-
-    def _build(self) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
-
-        # Thumbnail / play button
-        self._thumb = QPushButton()
-        self._thumb.setObjectName("VideoThumb")
-        self._thumb.setFixedSize(120, 90)
-        self._thumb.setText("▶")
-        self._thumb.clicked.connect(self._open_player)
-
-        video_payload = self._data.get("video_payload") or {}
-        clip_id = self._data.get("id", "")
-        thumb_path = _THUMB_DIR / f"{clip_id}.jpg"
-        if thumb_path.exists():
-            px = QPixmap(str(thumb_path)).scaled(120, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self._thumb.setIcon(px if not px.isNull() else QPixmap())
-            self._thumb.setIconSize(self._thumb.size())
-
-        layout.addWidget(self._thumb)
-
-        # Info
-        info = QVBoxLayout()
-        start = video_payload.get("start", 0)
-        end = video_payload.get("end", 0)
-        file_name = video_payload.get("file", "")
-        summary = self._data.get("document", "")[:400]
-
-        ts = f"{_fmt_time(start)} - {_fmt_time(end)}"
-        title = QLabel(f"{file_name}  [{ts}]")
-        title.setObjectName("CardTitle")
-        title.setWordWrap(True)
-
-        body = QLabel(summary)
-        body.setObjectName("CardBody")
-        body.setWordWrap(True)
-        body.setMaximumHeight(80)
-
-        info.addWidget(title)
-        info.addWidget(body)
-        info.addStretch()
-        layout.addLayout(info)
-
-    def _open_player(self) -> None:
-        video_payload = self._data.get("video_payload") or {}
-        file_name = video_payload.get("file", "")
-        start_sec = video_payload.get("start", 0)
-
-        file_path = cfg.abs_path(f"data/{file_name}")
-        if not file_path.exists():
-            file_path = Path(file_name)
-        if not file_path.exists():
-            logger.warning(f"Video file not found: {file_path}")
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
             return
-
-        from app.views.video_player import VideoPlayerDialog
-        dlg = VideoPlayerDialog(str(file_path), int(start_sec * 1000), self)
-        dlg.show()
+        super().mousePressEvent(event)
 
 
-# ---------------------------------------------------------------------------
-# HybridCard
-# ---------------------------------------------------------------------------
-
-class HybridCard(QFrame):
-    def __init__(self, data: dict, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("HybridCard")
-        self.setFrameShape(QFrame.StyledPanel)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
-        layout.addWidget(PDFCard(data, self))
-        layout.addWidget(VideoCard(data, self))
+def _display_content(result: dict) -> str:
+    payload = _payload(result)
+    return str(payload.get("display_content") or result.get("document") or result.get("content") or "").strip()
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _result_breadcrumb(result: dict) -> str:
+    """Return the full heading_path as a human-readable breadcrumb string."""
+    payload = _payload(result)
+    heading_path = str(payload.get("heading_path") or "").strip()
+    return heading_path
+
+
+def _result_title(result: dict) -> str:
+    payload = _payload(result)
+    heading_path = str(payload.get("heading_path") or "").strip()
+    if heading_path:
+        # Show only the last (most specific) segment — full path visible as tooltip
+        return heading_path.split(" > ")[-1][:72]
+
+    document = _display_content(result)
+    for line in document.splitlines():
+        stripped = line.strip().lstrip("#").strip()
+        if stripped:
+            return stripped[:72]
+
+    file_name = str(payload.get("file") or "").strip()
+    if file_name:
+        return Path(file_name).stem
+
+    video_payload = result.get("video_payload") or {}
+    video_file = str(video_payload.get("file") or "").strip()
+    if video_file:
+        return Path(video_file).stem
+
+    return "知识片段"
+
+
+def _result_summary(result: dict) -> str:
+    payload = _payload(result)
+    metadata = payload.get("metadata") or {}
+    semantic_description = ""
+    if isinstance(metadata, dict):
+        semantic_description = str(metadata.get("semantic_description") or "").strip()
+    if semantic_description:
+        summary = semantic_description
+    else:
+        document = _display_content(result)
+        lines = []
+        for line in document.splitlines():
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                lines.append(stripped)
+        summary = " ".join(lines[1:]) if len(lines) > 1 else (lines[0] if lines else "")
+    summary = summary.replace("  ", " ").strip()
+    if len(summary) > 110:
+        return summary[:110].rstrip() + "..."
+    return summary or "暂无摘要"
+
+
+def _result_source_tag(result: dict) -> str:
+    source_type = str(result.get("source_type") or "").lower()
+    if source_type == "video":
+        return "VIDEO"
+    if source_type == "markdown":
+        return "MD"
+    if source_type == "pdf":
+        return "PDF"
+    return "DOC"
+
+
+def _result_meta(result: dict) -> str:
+    """Return file · page · block_type meta string, plus heading breadcrumb."""
+    source_type = str(result.get("source_type") or "").lower()
+    if source_type == "video":
+        payload = result.get("video_payload") or {}
+        file_name = str(payload.get("file") or "").strip()
+        start = float(payload.get("start", 0) or 0)
+        end = float(payload.get("end", 0) or 0)
+        if file_name:
+            return f"{Path(file_name).name} · {_fmt_time(start)}-{_fmt_time(end)}"
+        return f"{_fmt_time(start)}-{_fmt_time(end)}"
+
+    payload = _payload(result)
+    file_name = str(payload.get("file") or "").strip()
+    page = payload.get("page", "")
+    block_type = str(payload.get("block_type") or "").strip()
+    heading_path = str(payload.get("heading_path") or "").strip()
+
+    parts = []
+    if file_name:
+        parts.append(Path(file_name).name)
+    if page not in ("", None):
+        parts.append(f"第 {page} 页")
+    if block_type:
+        parts.append(block_type)
+
+    # Show parent heading segment (one level above the last) as location context
+    if heading_path and " > " in heading_path:
+        segments = heading_path.split(" > ")
+        if len(segments) >= 2:
+            parent = segments[-2][:40]
+            parts.append(f"§ {parent}")
+
+    return " · ".join(parts)
+
 
 def _fmt_time(seconds: float) -> str:
-    s = int(seconds)
-    return f"{s // 60:02d}:{s % 60:02d}"
+    value = int(seconds)
+    return f"{value // 60:02d}:{value % 60:02d}"
+

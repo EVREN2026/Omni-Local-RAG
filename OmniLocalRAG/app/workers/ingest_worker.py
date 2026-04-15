@@ -15,6 +15,8 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 from app.models.chroma_store import ChromaStore
 from app.models.chunker import (
+    ChunkItem,
+    coerce_chunk_item,
     _extract_marker_page_number,   # used below for compat
     _markdown_to_items as _chunker_markdown_to_items,
     _parse_markdown_heading,
@@ -275,31 +277,40 @@ class IngestWorker(QThread):
         chunks: List[dict] = []
         used_ids = set()
         for item in items:
-            # items from _markdown_to_items() have 4 elements (text, page, coords, heading_path)
-            # items from _parse_pdf() have 4 elements (text, page, coords, heading_level_str)
-            text = item[0]
-            page = item[1] if len(item) > 1 else 0
-            coords = item[2] if len(item) > 2 else []
-            heading_path = item[3] if len(item) > 3 else ""
-            chunk_texts = [text] if source_type == "markdown" else _rough_split(text)
-            for chunk_text in chunk_texts:
-                if chunk_text.strip():
-                    chunk_id = stable_chunk_id(
-                        source_file=self.file_path,
-                        source_type=source_type,
-                        page=page,
-                        heading_path=heading_path,
-                        content=chunk_text,
-                        used_ids=used_ids,
-                    )
-                    chunks.append({
+            chunk_item = coerce_chunk_item(item)
+            legacy_text = chunk_item.legacy_text
+            raw_parts = [legacy_text] if source_type == "markdown" else _rough_split(legacy_text)
+            for part_text in raw_parts:
+                if not part_text.strip():
+                    continue
+                if len(raw_parts) == 1:
+                    display_content = chunk_item.display_content
+                    embedding_text = chunk_item.embedding_text
+                else:
+                    display_content = part_text
+                    embedding_text = part_text
+
+                chunk_id = stable_chunk_id(
+                    source_file=self.file_path,
+                    source_type=source_type,
+                    page=chunk_item.page,
+                    heading_path=chunk_item.heading_path,
+                    content=display_content,
+                    used_ids=used_ids,
+                )
+                chunks.append(
+                    {
                         "id": chunk_id,
-                        "content": chunk_text,
-                        "page": page,
-                        "coords": coords,
-                        "heading_path": heading_path,
-                        "block_type": "text",
-                    })
+                        "content": display_content.strip(),
+                        "display_content": display_content.strip(),
+                        "embedding_text": (embedding_text or display_content).strip(),
+                        "page": chunk_item.page,
+                        "coords": chunk_item.coords,
+                        "heading_path": chunk_item.heading_path,
+                        "block_type": chunk_item.block_type if len(raw_parts) == 1 else "text",
+                        "metadata": dict(chunk_item.metadata or {}),
+                    }
+                )
 
         total = len(chunks)
         logger.info(f"IngestWorker: {total} {source_type} chunks from {self.file_path}")
@@ -321,18 +332,36 @@ class IngestWorker(QThread):
                 vector_dim = None
                 stored = False
                 if index_vectors:
-                    [vec] = embed.encode([chunk["content"]])
+                    sparse_payload = None
+                    embed_backend = getattr(embed, "backend", "")
+                    if hasattr(embed, "encode_payloads"):
+                        [embedding_payload] = embed.encode_payloads(
+                            [chunk.get("embedding_text") or chunk["content"]],
+                            return_sparse=True,
+                        )
+                        vec = list(embedding_payload.get("dense") or [])
+                        sparse_payload = embedding_payload.get("sparse") or None
+                    else:
+                        [vec] = embed.encode([chunk.get("embedding_text") or chunk["content"]])
                     vector_dim = len(vec)
+                    payload = {
+                        "file": str(Path(self.file_path).name),
+                        "page": chunk["page"],
+                        "coords": chunk["coords"],
+                        "heading_path": chunk.get("heading_path", ""),
+                        "block_type": chunk.get("block_type", "text"),
+                        "display_content": chunk.get("display_content", chunk["content"]),
+                        "embedding_text": chunk.get("embedding_text", chunk["content"]),
+                        "metadata": chunk.get("metadata", {}),
+                    }
                     chroma.add(
                         content=chunk["content"],
                         embedding=vec,
                         source_type=source_type,
                         anchor_id=chunk["id"],
-                        pdf_payload={
-                            "file": str(Path(self.file_path).name),
-                            "page": chunk["page"],
-                            "coords": chunk["coords"],
-                        } if source_type == "pdf" else {},
+                        pdf_payload=payload,
+                        sparse_payload=sparse_payload,
+                        embed_backend=embed_backend,
                         is_manual=False,
                         doc_id=chunk["id"],
                     )
@@ -349,6 +378,9 @@ class IngestWorker(QThread):
                         "heading_path": chunk.get("heading_path", ""),
                         "block_type": chunk.get("block_type", "text"),
                         "content": chunk["content"],
+                        "display_content": chunk.get("display_content", chunk["content"]),
+                        "embedding_text": chunk.get("embedding_text", chunk["content"]),
+                        "metadata": chunk.get("metadata", {}),
                         "vector_dim": vector_dim,
                         "stored": stored,
                         "is_manual": False,
@@ -382,8 +414,23 @@ class IngestWorker(QThread):
         embed = EmbedManager()
         chroma = ChromaStore()
         try:
-            [vec] = embed.encode([new_content])
-            chroma.update(chunk_id, new_content, vec)
+            sparse_payload = None
+            embed_backend = getattr(embed, "backend", "")
+            if hasattr(embed, "encode_payloads"):
+                [embedding_payload] = embed.encode_payloads([new_content], return_sparse=True)
+                vec = list(embedding_payload.get("dense") or [])
+                sparse_payload = embedding_payload.get("sparse") or None
+            else:
+                [vec] = embed.encode([new_content])
+            chroma.update(
+                chunk_id,
+                new_content,
+                vec,
+                extra_meta={
+                    "sparse_payload": sparse_payload,
+                    "embed_backend": embed_backend,
+                },
+            )
             logger.info(f"re_embed: chunk {chunk_id} updated")
         except Exception as e:
             logger.error(f"re_embed failed: {e}", exc_info=True)

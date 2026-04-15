@@ -58,6 +58,26 @@ class BaseDocumentParser(ABC):
     def parameter_schema(self) -> Tuple[ParserParameter, ...]:
         return self.parameters
 
+    def _get_output_dir(self, file_path: str) -> Path:
+            """强化版：强制使用绝对路径，并解决可能的编码问题"""
+            # 使用 .resolve().absolute() 确保路径是系统级的绝对路径
+            full_path = Path(file_path).resolve().absolute()
+            base_path = full_path.parent
+            stem = full_path.stem
+            
+            # 文件夹命名：增加解析器后缀
+            out_dir = base_path / f"{stem}_{self.name}_output"
+            
+            # 强制创建目录
+            out_dir.mkdir(parents=True, exist_ok=True)
+            
+            # --- 关键调试代码：这一行会在你执行测试时直接在控制台打印出物理路径 ---
+            print(f"\n[DEBUG] 正在创建输出目录: {out_dir}")
+            if not out_dir.exists():
+                print(f"[ERROR] 文件夹创建失败，请检查权限！")
+            # -----------------------------------------------------------
+            
+            return out_dir
 
 class DoclingParser(BaseDocumentParser):
     name = "docling"
@@ -65,118 +85,155 @@ class DoclingParser(BaseDocumentParser):
 
     def to_markdown(self, file_path: str) -> str:
         isolated = bool(self.get_option("isolated", True))
-        timeout_sec = int(self.get_option("timeout_sec", 120))
+        timeout_sec = int(self.get_option("timeout_sec", 300))
+        out_dir = self._get_output_dir(file_path)
+
+        print(f"[INFO] 正在启动 Docling 解析...")
 
         try:
             if isolated:
-                return self._convert_docling_isolated(file_path, timeout_sec)
-            return self._convert_docling_inline(file_path)
-        except Exception:
-            # Docling upstream model artifacts have changed several times. Keep
-            # parser usability by falling back to deterministic local text
-            # extraction instead of hard-failing import workflows.
-            return self._pymupdf_fallback(file_path)
+                md_text = self._convert_docling_isolated(file_path, timeout_sec, str(out_dir))
+            else:
+                md_text = self._convert_docling_inline(file_path, str(out_dir))
+            
+            return md_text
+
+        except Exception as e:
+            print(f"[WARNING] Docling 解析异常: {e}")
+            print(f"[INFO] 正在尝试 PyMuPDF 高级兜底（包含文本+图像）...")
+            
+            # 强化版兜底：即使 Docling 报错，我也帮你把图和文字拿出来
+            md_text = self._pymupdf_fallback_with_images(file_path, out_dir)
+            return md_text
 
     @staticmethod
-    def _convert_docling_inline(file_path: str) -> str:
-        from docling.document_converter import DocumentConverter  # type: ignore
-
+    def _convert_docling_inline(file_path: str, out_dir: str) -> str:
+        from docling.document_converter import DocumentConverter
         converter = DocumentConverter()
         result = converter.convert(file_path)
         doc = getattr(result, "document", result)
-        if hasattr(doc, "export_to_markdown"):
-            return doc.export_to_markdown()
-        lines = []
-        for item in doc.iterate_items():
-            text = getattr(item, "text", "") or ""
-            if text.strip():
-                lines.append(text.strip())
-        return "\n\n".join(lines)
+        
+        # 保存图像
+        if hasattr(doc, "images") and doc.images:
+            img_dir = Path(out_dir) / "images"
+            img_dir.mkdir(exist_ok=True)
+            for i, img_item in enumerate(doc.images):
+                img_item.pil_image.save(img_dir / f"image_{i+1}.png")
+        
+        md_text = doc.export_to_markdown() if hasattr(doc, "export_to_markdown") else ""
+        (Path(out_dir) / "document.md").write_text(md_text, encoding="utf-8")
+        return md_text
 
     @staticmethod
-    def _convert_docling_isolated(file_path: str, timeout_sec: int) -> str:
+    def _convert_docling_isolated(file_path: str, timeout_sec: int, out_dir: str) -> str:
+        # 脚本内强制设置输出编码为 utf-8，解决 Windows 编码报错
         helper_code = r"""
 import pathlib
 import sys
-import traceback
+import io
 
-src = sys.argv[1]
-out = sys.argv[2]
+# 强制设置 IO 编码为 UTF-8
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+src, out_dir_str = sys.argv[1], sys.argv[2]
+out_dir = pathlib.Path(out_dir_str)
 
 try:
     from docling.document_converter import DocumentConverter
-
     converter = DocumentConverter()
     result = converter.convert(src)
     doc = getattr(result, "document", result)
-    if hasattr(doc, "export_to_markdown"):
-        markdown = doc.export_to_markdown()
-    else:
-        lines = []
-        for item in doc.iterate_items():
-            text = getattr(item, "text", "") or ""
-            if text.strip():
-                lines.append(text.strip())
-        markdown = "\n\n".join(lines)
-    pathlib.Path(out).write_text(markdown, encoding="utf-8")
-except Exception:
-    traceback.print_exc()
-    sys.exit(2)
+
+    if hasattr(doc, "images"):
+        img_dir = out_dir / "images"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        for i, img_item in enumerate(doc.images):
+            img_item.pil_image.save(img_dir / f"image_{i+1}.png")
+
+    markdown = doc.export_to_markdown() if hasattr(doc, "export_to_markdown") else ""
+    (out_dir / "document.md").write_text(markdown, encoding="utf-8")
+    sys.exit(0)
+except Exception as e:
+    import traceback
+    print(traceback.format_exc(), file=sys.stderr)
+    sys.exit(1)
 """
-        with tempfile.TemporaryDirectory() as td:
-            out_path = Path(td) / "docling_output.md"
-            proc = subprocess.run(
-                [sys.executable, "-c", helper_code, file_path, str(out_path)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=max(10, timeout_sec),
-            )
-            if proc.returncode == 0 and out_path.exists():
-                return out_path.read_text(encoding="utf-8", errors="replace")
-            detail = (proc.stderr or proc.stdout or "").strip()
-            raise RuntimeError(f"Docling isolated process failed: {detail or f'exit={proc.returncode}'}")
+        # capture_output=True 但不设置 text=True，避免 Python 自动用错误的编码去 decode
+        proc = subprocess.run(
+            [sys.executable, "-c", helper_code, file_path, out_dir],
+            capture_output=True, timeout=timeout_sec
+        )
+        
+        if proc.returncode != 0:
+            # 手动解码，并忽略无法识别的字符（如 GBK 中的中文报错字符）
+            error_details = proc.stderr.decode('utf-8', errors='replace')
+            if not error_details.strip():
+                error_details = proc.stderr.decode('gbk', errors='replace')
+            raise RuntimeError(f"子进程崩溃。详细错误:\n{error_details}")
 
-    @staticmethod
-    def _pymupdf_fallback(file_path: str) -> str:
-        import fitz  # type: ignore
+        md_file = Path(out_dir) / "document.md"
+        if md_file.exists():
+            return md_file.read_text(encoding="utf-8")
+        raise RuntimeError("Docling 子进程未产生 document.md")
 
-        parts: List[str] = []
-        doc = fitz.open(file_path)
+    def _pymupdf_fallback_with_images(self, file_path: str, out_dir: Path) -> str:
+        """高级兜底方案：使用 PyMuPDF 提取文本并保存页面为图片"""
+        import fitz
+        from PIL import Image
+        import io
+
+        md_parts = []
+        img_dir = out_dir / "images"
+        img_dir.mkdir(exist_ok=True)
+
         try:
+            doc = fitz.open(file_path)
             for page in doc:
-                text = (page.get_text("text") or "").strip()
+                # 1. 提取文字
+                text = page.get_text("text").strip()
                 if text:
-                    parts.append(f"<!-- page: {page.number + 1} -->\n\n{text}")
-        finally:
+                    md_parts.append(f"## Page {page.number + 1}\n\n{text}")
+                
+                # 2. 提取并保存当前页为图像（模拟图像数据产出）
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                img.save(img_dir / f"page_render_{page.number + 1}.png")
+            
             doc.close()
-        return "\n\n".join(parts).strip()
+            
+            final_md = "\n\n".join(md_parts)
+            (out_dir / "document_fallback.md").write_text(final_md, encoding="utf-8")
+            return final_md
+            
+        except Exception as e:
+            return f"PyMuPDF 兜底也失败了: {e}"
+
 
 
 class MarkerParser(BaseDocumentParser):
     name = "marker"
     display_name = "Marker"
     parameters = (
-        ParserParameter(
-            "device",
-            "推理设备",
-            "select",
-            "cpu",
-            (("CPU", "cpu"), ("CUDA", "cuda")),
-        ),
+        ParserParameter("device", "推理设备", "select", "cpu", (("CPU", "cpu"), ("CUDA", "cuda"))),
     )
 
     def to_markdown(self, file_path: str) -> str:
         from marker.converters.pdf import PdfConverter  # type: ignore
         from marker.models import create_model_dict  # type: ignore
-        from marker.output import text_from_rendered  # type: ignore
-
+        from marker.output import save_output  # type: ignore
+        
+        out_dir = self._get_output_dir(file_path)
         device = self.get_option("device", cfg.get("pdf.marker_device", "cpu"))
         os.environ.setdefault("TORCH_DEVICE", str(device))
+        
         converter = PdfConverter(artifact_dict=create_model_dict())
         rendered = converter(file_path)
-        markdown, _, _ = text_from_rendered(rendered)
+        
+        # 使用官方 API 自动保存 Markdown 和相关图片资源
+        doc_stem = Path(file_path).stem
+        markdown, _, _ = save_output(rendered, str(out_dir), doc_stem)
+        
         return markdown
 
 
@@ -184,26 +241,29 @@ class UnstructuredParser(BaseDocumentParser):
     name = "unstructured"
     display_name = "Unstructured"
     parameters = (
-        ParserParameter(
-            "strategy",
-            "解析策略",
-            "select",
-            "auto",
-            (("自动", "auto"), ("快速", "fast"), ("高精度", "hi_res"), ("仅 OCR", "ocr_only")),
-        ),
+        ParserParameter("strategy", "解析策略", "select", "auto", (("自动", "auto"), ("快速", "fast"), ("高精度", "hi_res"), ("仅 OCR", "ocr_only"))),
         ParserParameter("languages", "语言列表", "text", "eng,chi_sim"),
     )
 
     def to_markdown(self, file_path: str) -> str:
         from unstructured.partition.auto import partition  # type: ignore
+        
+        out_dir = self._get_output_dir(file_path)
+        img_dir = out_dir / "images"
+        img_dir.mkdir(exist_ok=True)
 
         strategy = self.get_option("strategy", "auto")
         languages = self.get_option("languages", "eng,chi_sim")
-        kwargs: Dict[str, Any] = {"filename": file_path}
-        if strategy:
-            kwargs["strategy"] = strategy
-        if languages:
-            kwargs["languages"] = [part.strip() for part in str(languages).split(",") if part.strip()]
+        
+        kwargs: Dict[str, Any] = {
+            "filename": file_path,
+            "extract_image_block_types": ["Image", "Table"],  # 指示底层提取图片和表格图像
+            "extract_image_block_output_dir": str(img_dir)    # 设定图像存放路径
+        }
+        
+        if strategy: kwargs["strategy"] = strategy
+        if languages: kwargs["languages"] = [part.strip() for part in str(languages).split(",") if part.strip()]
+            
         elements = partition(**kwargs)
         lines = []
         for elem in elements:
@@ -215,7 +275,10 @@ class UnstructuredParser(BaseDocumentParser):
                 lines.append(f"# {text}")
             else:
                 lines.append(text)
-        return "\n\n".join(lines).strip()
+                
+        md_text = "\n\n".join(lines).strip()
+        Path(out_dir).joinpath("document.md").write_text(md_text, encoding="utf-8")
+        return md_text
 
 
 class MinerUParser(BaseDocumentParser):
@@ -227,70 +290,50 @@ class MinerUParser(BaseDocumentParser):
     )
 
     def to_markdown(self, file_path: str) -> str:
-        """
-        MinerU adapter via external command.
-        Configure in config.json:
-          pdf.parser_options.mineru.command: "mineru"
-        The command should output a markdown file path on stdout OR write
-        <input_stem>.md under the provided temp output directory.
-        """
+        out_dir = self._get_output_dir(file_path)
+        
         mineru_cmd = str(self.get_option("command", cfg.get("pdf.mineru_cmd", "mineru")))
         extra_args = str(self.get_option("extra_args", "") or "")
-        with tempfile.TemporaryDirectory() as td:
-            out_dir = Path(td)
-            base_cmd = shlex.split(mineru_cmd, posix=(os.name != "nt"))
-            attempts = [
-                # MinerU 2.x CLI and safer defaults for constrained desktop envs.
-                base_cmd
-                + [
-                    "--path",
-                    file_path,
-                    "--output",
-                    str(out_dir),
-                    "--table",
-                    "false",
-                    "--formula",
-                    "false",
-                ],
-                base_cmd + ["--input", file_path, "--output", str(out_dir), "--format", "markdown"],
-            ]
-            if extra_args:
-                extra = shlex.split(extra_args, posix=(os.name != "nt"))
-                attempts = [cmd + extra for cmd in attempts]
+        
+        base_cmd = shlex.split(mineru_cmd, posix=(os.name != "nt"))
+        
+        # 直接输出到持久化目录，不再使用 tempfile
+        attempts = [
+            base_cmd + [
+                "--path", file_path,
+                "--output", str(out_dir),
+                # 图像提取强依赖于这两项，保持原样或明确开启
+            ],
+            base_cmd + ["--input", file_path, "--output", str(out_dir), "--format", "markdown"],
+        ]
+        
+        if extra_args:
+            extra = shlex.split(extra_args, posix=(os.name != "nt"))
+            attempts = [cmd + extra for cmd in attempts]
 
-            last_detail = ""
-            for cmd in attempts:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                if proc.returncode == 0:
-                    last_detail = ""
-                    break
-                last_detail = (proc.stderr or proc.stdout or "").strip()
-            if last_detail:
-                raise RuntimeError(f"MinerU 执行失败: {last_detail or f'exit={proc.returncode}'}")
+        last_detail = ""
+        for cmd in attempts:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+            if proc.returncode == 0:
+                last_detail = ""
+                break
+            last_detail = (proc.stderr or proc.stdout or "").strip()
+            
+        if last_detail:
+            raise RuntimeError(f"MinerU 执行失败: {last_detail or f'exit={proc.returncode}'}")
 
-            md_path: Path | None = None
-            stdout = (proc.stdout or "").strip()
-            if stdout and Path(stdout).exists() and stdout.lower().endswith(".md"):
-                md_path = Path(stdout)
-            else:
-                candidate = out_dir / f"{Path(file_path).stem}.md"
-                if candidate.exists():
-                    md_path = candidate
-                else:
-                    mds = sorted(out_dir.rglob("*.md"))
-                    if mds:
-                        md_path = mds[0]
+        # 在输出目录中寻找产生的 .md 文件
+        candidate = out_dir / f"{Path(file_path).stem}.md"
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8", errors="replace")
+            
+        mds = sorted(out_dir.rglob("*.md"))
+        if mds:
+            return mds[0].read_text(encoding="utf-8", errors="replace")
 
-            if md_path is None or not md_path.exists():
-                raise RuntimeError("MinerU 未产出 markdown 文件，请检查 MinerU 命令参数")
-
-            return md_path.read_text(encoding="utf-8", errors="replace")
+        raise RuntimeError("MinerU 未产出 markdown 文件，请检查 MinerU 命令参数")
 
 
 class OcrParser(BaseDocumentParser):
@@ -302,6 +345,10 @@ class OcrParser(BaseDocumentParser):
     )
 
     def to_markdown(self, file_path: str) -> str:
+        out_dir = self._get_output_dir(file_path)
+        img_dir = out_dir / "pages"
+        img_dir.mkdir(exist_ok=True)
+        
         results = []
         try:
             import fitz  # type: ignore
@@ -314,12 +361,21 @@ class OcrParser(BaseDocumentParser):
             for page in doc:
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
                 image = Image.open(BytesIO(pix.tobytes("png")))
+                
+                # 物理保存当前页面的渲染图
+                image.save(img_dir / f"page_{page.number + 1}.png")
+                
                 text = pytesseract.image_to_string(image, lang=lang)
                 if text.strip():
-                    results.append(f"<!-- page: {page.number + 1} -->\n\n{text.strip()}")
+                    results.append(f"\n\n{text.strip()}")
+            doc.close()
+            
+            md_text = "\n\n".join(results)
+            Path(out_dir).joinpath("document.md").write_text(md_text, encoding="utf-8")
+            return md_text
+            
         except Exception as e:
             raise RuntimeError(f"OCR 解析失败: {e}") from e
-        return "\n\n".join(results)
 
 
 PARSER_REGISTRY: Dict[str, BaseDocumentParser] = {
@@ -329,7 +385,6 @@ PARSER_REGISTRY: Dict[str, BaseDocumentParser] = {
     "marker": MarkerParser(),
     "ocr": OcrParser(),
 }
-
 
 def available_parser_names() -> List[str]:
     return list(PARSER_REGISTRY.keys())

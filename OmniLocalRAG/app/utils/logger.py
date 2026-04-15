@@ -26,6 +26,11 @@ def setup_logger() -> logging.Logger:
     except Exception:
         pass
 
+    # ── File handler: full DEBUG log, timestamped, daily rotation ──────
+    file_fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     handler = TimedRotatingFileHandler(
         filename=log_dir / "app.log",
         when="midnight",
@@ -33,20 +38,44 @@ def setup_logger() -> logging.Logger:
         encoding="utf-8",
     )
     handler.suffix = "%Y-%m-%d"
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    )
+    handler.setFormatter(file_fmt)
     logger.addHandler(handler)
 
+    # ── Console handler: INFO and above, clean single-line format ───────
+    # RAG_TRACE records (level 25) use their own multi-line block format;
+    # regular INFO records are printed as "[INFO] message".
     console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    console.setLevel(logging.DEBUG)
+    console.setFormatter(_RagConsoleFormatter())
     logger.addHandler(console)
 
     return logger
+
+
+# ---------------------------------------------------------------------------
+# Custom log level: RAG_TRACE (between DEBUG=10 and INFO=20)
+# Used exclusively for the four-part structured RAG trace blocks so they
+# stand out visually from regular INFO messages without cluttering the
+# standard log stream.
+# ---------------------------------------------------------------------------
+RAG_TRACE = 15
+logging.addLevelName(RAG_TRACE, "RAG")
+
+
+class _RagConsoleFormatter(logging.Formatter):
+    """Console formatter that renders RAG_TRACE records as decorated blocks
+    and all other records as plain "[LEVEL] message" lines."""
+
+    _DIVIDER = "=" * 72
+    _SECTION  = "-" * 72
+
+    def format(self, record: logging.LogRecord) -> str:
+        if record.levelno == RAG_TRACE:
+            # RAG_TRACE messages are already pre-formatted multi-line blocks;
+            # just return them verbatim so the block borders print correctly.
+            return record.getMessage()
+        level = record.levelname
+        return f"[{level}] {record.getMessage()}"
 
 
 logger = setup_logger()

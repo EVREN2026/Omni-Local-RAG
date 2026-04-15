@@ -173,7 +173,7 @@ def main() -> int:
         logger.warning("System tray not available on this desktop — tray icon hidden")
 
     tray.show()
-
+ 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
     logger.info(f"Application ready in {elapsed_ms:.0f} ms — entering event loop")
 

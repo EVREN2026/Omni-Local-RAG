@@ -1,4 +1,4 @@
-"""Cross-modal binding management panel."""
+﻿"""Cross-modal binding management panel."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from typing import Dict, List, Optional
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QAbstractItemView,
-    QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -19,13 +17,13 @@ from PyQt5.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from app.models.sqlite_store import SQLiteStore
 from app.utils import config as cfg
 from app.utils.logger import logger
+from app.utils.ui_loader import load_ui, require_child
 
 
 class CrossModalPanel(QWidget):
@@ -44,92 +42,49 @@ class CrossModalPanel(QWidget):
         self.refresh_all()
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        load_ui(self, "cross_modal_panel.ui")
 
-        top = QHBoxLayout()
-        title = QLabel("跨模态绑定管理")
-        title.setStyleSheet("font-weight: bold;")
-        self._status = QLabel("")
+        self._title = require_child(self, QLabel, "titleLabel", "CrossModalPanel UI")
+        self._status = require_child(self, QLabel, "statusLabel", "CrossModalPanel UI")
+        self._refresh_btn = require_child(self, QPushButton, "refreshButton", "CrossModalPanel UI")
+        self._splitter = require_child(self, QSplitter, "mainSplitter", "CrossModalPanel UI")
+
+        self._anchor_filter = require_child(self, QLineEdit, "anchorFilterEdit", "CrossModalPanel UI")
+        self._anchor_table = require_child(self, QTableWidget, "anchorTable", "CrossModalPanel UI")
+        self._clip_filter = require_child(self, QLineEdit, "clipFilterEdit", "CrossModalPanel UI")
+        self._clip_table = require_child(self, QTableWidget, "clipTable", "CrossModalPanel UI")
+        self._binding_filter = require_child(self, QLineEdit, "bindingFilterEdit", "CrossModalPanel UI")
+        self._binding_table = require_child(self, QTableWidget, "bindingTable", "CrossModalPanel UI")
+        self._bind_btn = require_child(self, QPushButton, "bindSelectedButton", "CrossModalPanel UI")
+        self._repair_btn = require_child(self, QPushButton, "repairSelectedButton", "CrossModalPanel UI")
+        self._delete_btn = require_child(self, QPushButton, "deleteBindingButton", "CrossModalPanel UI")
+
+        self._title.setStyleSheet("font-weight: bold;")
         self._status.setStyleSheet("color: #777;")
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.clicked.connect(self.refresh_all)
-        top.addWidget(title)
-        top.addStretch()
-        top.addWidget(self._status)
-        top.addWidget(refresh_btn)
-        root.addLayout(top)
-
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._build_anchor_box())
-        splitter.addWidget(self._build_clip_box())
-        splitter.addWidget(self._build_binding_box())
-        splitter.setSizes([440, 360, 520])
-        root.addWidget(splitter, 1)
-
-    def _build_anchor_box(self) -> QWidget:
-        box = QGroupBox("文档 Anchor")
-        layout = QVBoxLayout(box)
-        self._anchor_filter = QLineEdit()
-        self._anchor_filter.setPlaceholderText("筛选文件、anchor_id、标题、内容")
+        self._refresh_btn.clicked.connect(self.refresh_all)
         self._anchor_filter.textChanged.connect(self._populate_anchor_table)
-        layout.addWidget(self._anchor_filter)
+        self._clip_filter.textChanged.connect(self._populate_clip_table)
+        self._binding_filter.textChanged.connect(self._populate_binding_table)
+        self._bind_btn.clicked.connect(self._bind_selected)
+        self._repair_btn.clicked.connect(self._repair_selected)
+        self._delete_btn.clicked.connect(self._delete_selected)
 
-        self._anchor_table = QTableWidget()
         self._anchor_table.setColumnCount(5)
-        self._anchor_table.setHorizontalHeaderLabels(["来源", "anchor_id", "页", "标题", "内容预览"])
+        self._anchor_table.setHorizontalHeaderLabels(["来源", "anchor_id", "页码", "标题", "内容预览"])
         self._setup_table(self._anchor_table)
         self._anchor_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        layout.addWidget(self._anchor_table, 1)
-        return box
 
-    def _build_clip_box(self) -> QWidget:
-        box = QGroupBox("视频 Clip")
-        layout = QVBoxLayout(box)
-        self._clip_filter = QLineEdit()
-        self._clip_filter.setPlaceholderText("筛选视频、摘要、clip_id")
-        self._clip_filter.textChanged.connect(self._populate_clip_table)
-        layout.addWidget(self._clip_filter)
-
-        self._clip_table = QTableWidget()
         self._clip_table.setColumnCount(5)
         self._clip_table.setHorizontalHeaderLabels(["视频", "时间", "摘要", "clip_id", "向量"])
         self._setup_table(self._clip_table)
         self._clip_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        layout.addWidget(self._clip_table, 1)
-        return box
 
-    def _build_binding_box(self) -> QWidget:
-        box = QGroupBox("绑定记录")
-        layout = QVBoxLayout(box)
-        self._binding_filter = QLineEdit()
-        self._binding_filter.setPlaceholderText("筛选视频、摘要、anchor、状态")
-        self._binding_filter.textChanged.connect(self._populate_binding_table)
-        layout.addWidget(self._binding_filter)
-
-        self._binding_table = QTableWidget()
         self._binding_table.setColumnCount(7)
-        self._binding_table.setHorizontalHeaderLabels(
-            ["视频", "时间", "摘要", "Anchor来源", "Anchor", "状态", "绑定ID"]
-        )
+        self._binding_table.setHorizontalHeaderLabels(["视频", "时间", "摘要", "Anchor来源", "Anchor", "状态", "绑定ID"])
         self._setup_table(self._binding_table)
         self._binding_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        layout.addWidget(self._binding_table, 1)
 
-        actions = QHBoxLayout()
-        bind_btn = QPushButton("绑定选中")
-        bind_btn.clicked.connect(self._bind_selected)
-        repair_btn = QPushButton("修复到选中 Anchor")
-        repair_btn.clicked.connect(self._repair_selected)
-        delete_btn = QPushButton("删除绑定")
-        delete_btn.clicked.connect(self._delete_selected)
-        actions.addWidget(bind_btn)
-        actions.addWidget(repair_btn)
-        actions.addWidget(delete_btn)
-        actions.addStretch()
-        layout.addLayout(actions)
-        return box
+        self._splitter.setSizes([440, 360, 520])
 
     @staticmethod
     def _setup_table(table: QTableWidget) -> None:
@@ -153,16 +108,16 @@ class CrossModalPanel(QWidget):
     def refresh_clips(self) -> None:
         try:
             self._clips = SQLiteStore().list_clips()
-        except Exception as e:
-            logger.error(f"CrossModalPanel: list clips failed: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error(f"CrossModalPanel: list clips failed: {exc}", exc_info=True)
             self._clips = []
         self._populate_clip_table()
 
     def refresh_bindings(self) -> None:
         try:
             self._bindings = SQLiteStore().list_cross_modal()
-        except Exception as e:
-            logger.error(f"CrossModalPanel: list bindings failed: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error(f"CrossModalPanel: list bindings failed: {exc}", exc_info=True)
             self._bindings = []
         self._populate_binding_table()
         self._update_status()
@@ -177,7 +132,7 @@ class CrossModalPanel(QWidget):
                 row.get("anchor_id", ""),
                 str(row.get("page", "")),
                 row.get("heading_path", ""),
-                _preview(row.get("content", ""), 90),
+                _preview(row.get("display_content") or row.get("content", ""), 90),
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
@@ -226,7 +181,7 @@ class CrossModalPanel(QWidget):
         anchor = self._anchor_map.get(str(binding.get("pdf_anchor_id", "")))
         if anchor:
             row["anchor_source"] = anchor.get("source_file", "")
-            row["anchor_preview"] = anchor.get("content", "")
+            row["anchor_preview"] = anchor.get("display_content") or anchor.get("content", "")
             row["status"] = "OK"
         else:
             row["anchor_source"] = ""
@@ -248,7 +203,7 @@ class CrossModalPanel(QWidget):
         )
         self.refresh_bindings()
         self.binding_changed.emit()
-        self._status.setText(f"已绑定: {map_id[:8]}...")
+        self._status.setText(f"已绑定 {map_id[:8]}...")
 
     def _repair_selected(self) -> None:
         binding = self._selected_row_data(self._binding_table)
@@ -262,7 +217,7 @@ class CrossModalPanel(QWidget):
         )
         self.refresh_bindings()
         self.binding_changed.emit()
-        self._status.setText(f"已修复绑定: {str(binding['id'])[:8]}...")
+        self._status.setText(f"已修复绑定 {str(binding['id'])[:8]}...")
 
     def _delete_selected(self) -> None:
         binding = self._selected_row_data(self._binding_table)
@@ -300,8 +255,8 @@ def _load_all_anchors() -> List[Dict]:
     for json_path in sorted(exports_root.rglob("*.chunks.json")):
         try:
             payload = json.loads(json_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning(f"CrossModalPanel: skip invalid chunks json {json_path}: {e}")
+        except Exception as exc:
+            logger.warning(f"CrossModalPanel: skip invalid chunks json {json_path}: {exc}")
             continue
 
         source_file = payload.get("source_file") or json_path.name
@@ -322,6 +277,9 @@ def _load_all_anchors() -> List[Dict]:
                     "page": chunk.get("page", ""),
                     "heading_path": str(chunk.get("heading_path", "")),
                     "content": str(chunk.get("content", "")),
+                    "display_content": str(chunk.get("display_content") or chunk.get("content", "")),
+                    "embedding_text": str(chunk.get("embedding_text") or chunk.get("content", "")),
+                    "metadata": dict(chunk.get("metadata", {}) or {}),
                 }
             )
     return anchors

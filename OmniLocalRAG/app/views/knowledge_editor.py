@@ -1,28 +1,18 @@
-"""
-KnowledgeEditor: top-level window hosting PDF/Chunk/Video/Dataflow/API panels.
+﻿"""
+KnowledgeEditor: top-level window hosting document, chunk, video, dataflow,
+cross-modal, and API settings panels.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PyQt5.QtWidgets import (
-    QComboBox,
-    QFileDialog,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
-    QProgressBar,
-    QPushButton,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QComboBox, QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QTabWidget, QWidget
 
 from app.controllers.ingest_controller import IngestController
 from app.controllers.search_controller import SearchController
 from app.utils.logger import logger
+from app.utils.ui_loader import load_ui, require_child
 
 
 class KnowledgeEditor(QMainWindow):
@@ -33,8 +23,6 @@ class KnowledgeEditor(QMainWindow):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Omni-Local RAG - Knowledge Editor")
-        self.resize(1200, 760)
         self._ingest = ingest_ctrl
         self._search = search_ctrl
         self._last_pdf_path: Optional[str] = None
@@ -42,35 +30,28 @@ class KnowledgeEditor(QMainWindow):
         self._build()
 
     def _build(self) -> None:
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+        load_ui(self, "knowledge_editor.ui")
 
-        toolbar = QHBoxLayout()
-        btn_import_file = QPushButton("导入文件")
-        btn_import_file.clicked.connect(self._import_pdf)
-        btn_import_video = QPushButton("导入视频")
-        btn_import_video.clicked.connect(self._import_video)
-        toolbar.addWidget(btn_import_file)
-        toolbar.addWidget(btn_import_video)
-        toolbar.addStretch()
-        root.addLayout(toolbar)
+        self._stage_label = require_child(self, QLabel, "stageLabel", "KnowledgeEditor UI")
+        self._progress_bar = require_child(self, QProgressBar, "progressBar", "KnowledgeEditor UI")
+        self._tabs = require_child(self, QTabWidget, "tabsWidget", "KnowledgeEditor UI")
+        self._clip_combo = require_child(self, QComboBox, "clipCombo", "KnowledgeEditor UI")
+        self._anchor_combo = require_child(self, QComboBox, "anchorCombo", "KnowledgeEditor UI")
+        btn_import_file = require_child(self, QPushButton, "importFileButton", "KnowledgeEditor UI")
+        btn_import_video = require_child(self, QPushButton, "importVideoButton", "KnowledgeEditor UI")
+        btn_bind = require_child(self, QPushButton, "bindButton", "KnowledgeEditor UI")
 
-        progress_row = QHBoxLayout()
-        self._stage_label = QLabel("就绪")
-        self._stage_label.setFixedWidth(240)
-        self._progress_bar = QProgressBar()
+        self.setWindowTitle("Omni-Local RAG - Knowledge Editor")
+        self.resize(1200, 760)
+
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setTextVisible(True)
-        self._progress_bar.setFixedHeight(18)
         self._progress_bar.setVisible(False)
-        progress_row.addWidget(self._stage_label)
-        progress_row.addWidget(self._progress_bar)
-        root.addLayout(progress_row)
 
-        self._tabs = QTabWidget()
-        root.addWidget(self._tabs)
+        btn_import_file.clicked.connect(self._import_pdf)
+        btn_import_video.clicked.connect(self._import_video)
+        btn_bind.clicked.connect(self._bind_cross_modal)
 
         from app.views.pdf_workbench import PDFWorkbench
         from app.views.chunk_workbench import ChunkWorkbench
@@ -83,7 +64,7 @@ class KnowledgeEditor(QMainWindow):
         self._chunk_bench = ChunkWorkbench(self)
         self._video_bench = VideoWorkbench(self._ingest, self)
         self._dataflow_panel = DataflowPanel(self)
-        self._dataflow_panel.set_search_controller(self._search)   # Phase 2-3: cache invalidation
+        self._dataflow_panel.set_search_controller(self._search)
         self._cross_modal_panel = CrossModalPanel(self)
         self._api_settings_panel = ApiSettingsPanel(self)
 
@@ -93,6 +74,7 @@ class KnowledgeEditor(QMainWindow):
         self._tabs.addTab(self._dataflow_panel, "数据流管理")
         self._tabs.addTab(self._cross_modal_panel, "跨模态绑定")
         self._tabs.addTab(self._api_settings_panel, "API设置")
+
         self._video_bench.clip_created.connect(self._on_clip_created)
         self._video_bench.clips_loaded.connect(self._refresh_clip_combo)
         self._chunk_bench.chunks_available.connect(self._refresh_anchor_combo)
@@ -101,26 +83,7 @@ class KnowledgeEditor(QMainWindow):
         self._video_bench.clips_loaded.connect(lambda _: self._cross_modal_panel.refresh_clips())
         self._chunk_bench.chunks_available.connect(lambda _: self._cross_modal_panel.refresh_anchors())
         self._dataflow_panel.chunks_loaded.connect(lambda _: self._cross_modal_panel.refresh_anchors())
-
-        self._api_settings_panel.settings_saved.connect(
-            lambda _: self._stage_label.setText("API 配置已保存")
-        )
-
-        align_group = QGroupBox("跨模态对齐绑定")
-        align_layout = QHBoxLayout(align_group)
-        align_layout.addWidget(QLabel("视频切片:"))
-        self._clip_combo = QComboBox()
-        self._clip_combo.setMinimumWidth(200)
-        align_layout.addWidget(self._clip_combo)
-        align_layout.addWidget(QLabel("关联 PDF 段落 (anchor_id):"))
-        self._anchor_combo = QComboBox()
-        self._anchor_combo.setMinimumWidth(200)
-        align_layout.addWidget(self._anchor_combo)
-        btn_bind = QPushButton("绑定")
-        btn_bind.clicked.connect(self._bind_cross_modal)
-        align_layout.addWidget(btn_bind)
-        align_layout.addStretch()
-        root.addWidget(align_group)
+        self._api_settings_panel.settings_saved.connect(lambda _: self._stage_label.setText("API 配置已保存"))
 
         self._ingest.progress.connect(self._on_progress)
         self._ingest.finished.connect(self._on_ingest_done)
@@ -153,7 +116,10 @@ class KnowledgeEditor(QMainWindow):
 
     def _import_video(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择视频文件", "", "Video Files (*.mp4 *.mkv *.avi *.mov)"
+            self,
+            "选择视频文件",
+            "",
+            "Video Files (*.mp4 *.mkv *.avi *.mov)",
         )
         if not path:
             return
@@ -170,14 +136,14 @@ class KnowledgeEditor(QMainWindow):
             return
         from app.models.sqlite_store import SQLiteStore
 
-        mid = SQLiteStore().insert_cross_modal(clip_id, anchor_id)
-        logger.info(f"Cross-modal map created: {mid}")
+        mapping_id = SQLiteStore().insert_cross_modal(clip_id, anchor_id)
+        logger.info(f"Cross-modal map created: {mapping_id}")
         self._cross_modal_panel.refresh_bindings()
-        self._stage_label.setText(f"已绑定: {clip_id[:8]}... -> {anchor_id[:8]}...")
+        self._stage_label.setText(f"已绑定 {str(clip_id)[:8]}... -> {str(anchor_id)[:8]}...")
 
     def _refresh_anchor_combo(self, chunks: list) -> None:
         self._anchor_combo.clear()
-        for index, chunk in enumerate(chunks, start=1):
+        for chunk in chunks:
             if not isinstance(chunk, dict):
                 continue
             anchor_id = str(chunk.get("anchor_id") or chunk.get("chunk_id") or "").strip()
@@ -187,7 +153,7 @@ class KnowledgeEditor(QMainWindow):
             source_file = str(chunk.get("source_file") or "").strip()
             page = chunk.get("page", "")
             heading = str(chunk.get("heading_path") or "").replace("\n", " ").strip()
-            content = str(chunk.get("content") or "").replace("\n", " ").strip()
+            content = str(chunk.get("display_content") or chunk.get("content") or "").replace("\n", " ").strip()
             preview = content[:56] + ("..." if len(content) > 56 else "")
 
             label_parts = []
@@ -203,9 +169,7 @@ class KnowledgeEditor(QMainWindow):
 
             self._anchor_combo.addItem(" | ".join(label_parts), anchor_id)
 
-        self._stage_label.setText(
-            f"Anchor 列表已更新: {self._anchor_combo.count()} 个 chunk"
-        )
+        self._stage_label.setText(f"Anchor 列表已更新: {self._anchor_combo.count()} 个 chunk")
 
     def _on_progress(self, current: int, total: int) -> None:
         if total > 0:
@@ -220,7 +184,7 @@ class KnowledgeEditor(QMainWindow):
         self._progress_bar.setVisible(False)
         if success:
             if self._active_import_kind == "file":
-                self._stage_label.setText("文件转换完成，请到分块管理页点击“启动切块”")
+                self._stage_label.setText("文件转换完成，请到分块管理页继续处理。")
                 self._tabs.setCurrentWidget(self._pdf_bench)
                 if self._last_pdf_path:
                     self._pdf_bench.load_converted_markdown(self._last_pdf_path)
@@ -239,6 +203,7 @@ class KnowledgeEditor(QMainWindow):
         self._stage_label.setText(f"错误: {msg}")
 
     def _on_degraded(self, attempted: str, fallback: str, reason: str) -> None:
+        del attempted, fallback
         from PyQt5.QtWidgets import QMessageBox
 
         QMessageBox.information(self, "解析器降级", reason)
@@ -254,6 +219,7 @@ class KnowledgeEditor(QMainWindow):
             self._stage_label.setText(f"解析页面: {current}/{total}")
 
     def _on_parse_done(self, parser_name: str, num_blocks: int) -> None:
+        del num_blocks
         self._stage_label.setText(f"转换完成 ({parser_name})，已生成 Markdown")
 
     def _on_clip_created(self, clip: dict) -> None:
@@ -261,7 +227,7 @@ class KnowledgeEditor(QMainWindow):
         if not clip_id:
             return
         self._add_clip_to_combo(clip)
-        self._stage_label.setText(f"切片已创建: {clip_id[:8]}...")
+        self._stage_label.setText(f"切片已创建: {str(clip_id)[:8]}...")
 
     def _refresh_clip_combo(self, clips: list) -> None:
         self._clip_combo.clear()
@@ -280,6 +246,7 @@ class KnowledgeEditor(QMainWindow):
         end = clip.get("end", clip.get("end_sec", 0)) or 0
         video_file = str(clip.get("video_file") or "").strip()
         summary = str(clip.get("summary") or clip.get("semantic_summary") or "").replace("\n", " ").strip()
+
         label_parts = []
         if video_file:
             label_parts.append(video_file)
@@ -289,6 +256,5 @@ class KnowledgeEditor(QMainWindow):
             label_parts.append(f"{start}s-{end}s")
         if summary:
             label_parts.append(summary[:48] + ("..." if len(summary) > 48 else ""))
-        label_parts.append(f"{clip_id[:8]}...")
-        label = " | ".join(label_parts)
-        self._clip_combo.addItem(label, clip_id)
+        label_parts.append(f"{str(clip_id)[:8]}...")
+        self._clip_combo.addItem(" | ".join(label_parts), clip_id)

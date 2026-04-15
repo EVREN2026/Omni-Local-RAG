@@ -1,0 +1,274 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DataflowPanel</class>
+ <widget class="QWidget" name="DataflowPanel">
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>8</number>
+   </property>
+   <property name="topMargin">
+    <number>8</number>
+   </property>
+   <property name="rightMargin">
+    <number>8</number>
+   </property>
+   <property name="bottomMargin">
+    <number>8</number>
+   </property>
+   <item>
+    <layout class="QHBoxLayout" name="topBarLayout">
+     <item>
+      <widget class="QLabel" name="titleLabel">
+       <property name="text">
+        <string>数据流管理</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="apiOptimizeButton">
+       <property name="text">
+        <string>AI 优化选中 JSON</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QCheckBox" name="autoSyncCheckBox">
+       <property name="text">
+        <string>优化后自动同步到 DB</string>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="topBarSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progressBar">
+     <property name="visible">
+      <bool>false</bool>
+     </property>
+     <property name="value">
+      <number>0</number>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="logLabel">
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSplitter" name="mainSplitter">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <widget class="QGroupBox" name="markdownGroup">
+      <property name="title">
+       <string>L1 Markdown（人工可读）</string>
+      </property>
+      <layout class="QVBoxLayout" name="markdownGroupLayout">
+       <item>
+        <widget class="QListWidget" name="markdownList"/>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="markdownButtonsLayout">
+         <item>
+          <widget class="QPushButton" name="refreshFilesButton">
+           <property name="text">
+            <string>刷新列表</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="openMarkdownButton">
+           <property name="text">
+            <string>打开编辑</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QPushButton" name="mdToJsonButton">
+         <property name="text">
+          <string>转换 → JSON</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QGroupBox" name="jsonGroup">
+      <property name="title">
+       <string>L2 JSON（API 接口数据）</string>
+      </property>
+      <layout class="QVBoxLayout" name="jsonGroupLayout">
+       <item>
+        <layout class="QHBoxLayout" name="jsonPathLayout">
+         <item>
+          <widget class="QLineEdit" name="jsonPathEdit">
+           <property name="readOnly">
+            <bool>true</bool>
+           </property>
+           <property name="placeholderText">
+            <string>JSON 文件路径...</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="browseJsonButton">
+           <property name="text">
+            <string>浏览</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="chunkTable"/>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="chunkEditorGroup">
+         <property name="title">
+          <string>内联编辑（双击行打开）</string>
+         </property>
+         <layout class="QVBoxLayout" name="chunkEditorGroupLayout">
+          <item>
+           <widget class="QTextEdit" name="chunkEditor"/>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="saveChunkLayout">
+            <item>
+             <spacer name="saveChunkSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="saveChunkButton">
+              <property name="text">
+               <string>保存修改</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="jsonActionsLayout">
+         <item>
+          <widget class="QPushButton" name="reloadJsonButton">
+           <property name="text">
+            <string>重新加载</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="jsonToMdButton">
+           <property name="text">
+            <string>转换 → MD</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QGroupBox" name="databaseGroup">
+      <property name="title">
+       <string>L3 数据库（检索引擎）</string>
+      </property>
+      <layout class="QVBoxLayout" name="databaseGroupLayout">
+       <item>
+        <widget class="QLabel" name="dbStatsLabel">
+         <property name="text">
+          <string>向量数量：—</string>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="syncStatusLabel">
+         <property name="text">
+          <string/>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="checkDiffButton">
+         <property name="text">
+          <string>检查变更</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="syncButton">
+         <property name="text">
+          <string>同步到 DB</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QProgressBar" name="syncProgressBar">
+         <property name="visible">
+          <bool>false</bool>
+         </property>
+         <property name="value">
+          <number>0</number>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="databaseSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -126,6 +126,9 @@ class PdfVectorExportTest(unittest.TestCase):
                     "heading_path": "Sample",
                     "block_type": "text",
                     "content": "chunk content",
+                    "display_content": "chunk content",
+                    "embedding_text": "[Path: Sample]\n\nchunk content",
+                    "metadata": {"path": "Sample", "type": "text"},
                     "vector_dim": None,
                     "stored": False,
                     "is_manual": False,
@@ -151,6 +154,7 @@ class PdfVectorExportTest(unittest.TestCase):
         self.assertIn("# PDF Chunk Export", markdown)
         self.assertIn("- Source file: sample.pdf", markdown)
         self.assertIn("- vector_dim: None", markdown)
+        self.assertIn("### Display Content", markdown)
         self.assertIn("```text", markdown)
 
     def test_markdown_file_is_embedded_stored_and_exported(self):
@@ -170,7 +174,10 @@ class PdfVectorExportTest(unittest.TestCase):
         for add_call in FakeChromaStore.add_calls:
             self.assertEqual(add_call["source_type"], "markdown")
             self.assertTrue(add_call["anchor_id"])
-            self.assertEqual(add_call["pdf_payload"], {})
+            self.assertEqual(add_call["pdf_payload"]["file"], "notes.md")
+            self.assertIn("display_content", add_call["pdf_payload"])
+            self.assertIn("embedding_text", add_call["pdf_payload"])
+            self.assertIn("metadata", add_call["pdf_payload"])
 
         json_path = Path(self.temp_dir.name) / "data" / "exports" / "markdown" / "notes.chunks.json"
         md_path = Path(self.temp_dir.name) / "data" / "exports" / "markdown" / "notes.chunks.md"
@@ -182,9 +189,11 @@ class PdfVectorExportTest(unittest.TestCase):
         self.assertEqual(payload["source_type"], "markdown")
         self.assertEqual(payload["chunk_count"], len(FakeChromaStore.add_calls))
         self.assertTrue(all(chunk["source_type"] == "markdown" for chunk in payload["chunks"]))
-        contents = [chunk["content"] for chunk in payload["chunks"]]
-        self.assertTrue(any(content.startswith("Heading path: Title") for content in contents))
-        self.assertFalse(any(content.strip() == "# Title" for content in contents))
+        self.assertTrue(any(chunk["display_content"].startswith("alpha0") for chunk in payload["chunks"]))
+        self.assertTrue(any(chunk["embedding_text"].startswith("[Path: Title]") for chunk in payload["chunks"]))
+        self.assertTrue(any(chunk["block_type"] in {"term", "text", "tutorial"} for chunk in payload["chunks"]))
+        for add_call, chunk in zip(FakeChromaStore.add_calls, payload["chunks"]):
+            self.assertEqual(add_call["content"], chunk["display_content"])
 
     def test_markdown_chunking_merges_heading_metadata_with_body(self):
         markdown = (
@@ -198,14 +207,43 @@ class PdfVectorExportTest(unittest.TestCase):
         )
 
         items = self.ingest_worker._markdown_to_items(markdown)
-        content = "\n\n".join(item[0] for item in items)
+        display = "\n\n".join(getattr(item, "display_content", item[0]) for item in items)
+        embedding = "\n\n".join(getattr(item, "embedding_text", item[0]) for item in items)
 
-        self.assertIn("Heading path: Title", content)
-        self.assertIn("Author: Team", content)
-        self.assertIn("Date: 2026-04-10", content)
-        self.assertIn("Heading path: Title > Usage", content)
-        self.assertNotIn("# Title", content)
-        self.assertNotIn("Empty Section", content)
+        self.assertIn("Author: Team", display)
+        self.assertIn("Date: 2026-04-10", display)
+        self.assertIn("[Path: Title]", embedding)
+        self.assertIn("[Path: Title > Usage]", embedding)
+        self.assertNotIn("# Title", display)
+        self.assertNotIn("Empty Section", display)
+
+    def test_markdown_chunking_extracts_table_and_image_semantics(self):
+        markdown = (
+            "# 硬件连接\n\n"
+            "## 相机连接\n\n"
+            "左侧相机 IP 为 192.168.1.10。\n"
+            "![相机图](images/cam.jpg)\n"
+            "连接完成后检查取流状态。\n\n"
+            "| 参数 | 含义 | 默认值 |\n"
+            "| --- | --- | --- |\n"
+            "| n_gpu_layers | GPU层数 | 999 |\n"
+        )
+
+        items = self.ingest_worker._markdown_to_items(markdown)
+        block_types = [getattr(item, "block_type", "") for item in items]
+        self.assertIn("image", block_types)
+        self.assertTrue(any(bt in {"table", "parameter_table"} for bt in block_types))
+
+        image_item = next(item for item in items if getattr(item, "block_type", "") == "image")
+        image_meta = getattr(image_item, "metadata", {})
+        self.assertEqual(image_meta.get("image_path"), "images/cam.jpg")
+        self.assertTrue(image_meta.get("has_image"))
+        self.assertIn("[Path: 硬件连接 > 相机连接]", getattr(image_item, "embedding_text", ""))
+
+        table_item = next(item for item in items if getattr(item, "block_type", "") in {"table", "parameter_table"})
+        table_meta = getattr(table_item, "metadata", {})
+        self.assertTrue(table_meta.get("has_table"))
+        self.assertIn("n_gpu_layers", getattr(table_item, "embedding_text", ""))
 
     def test_parse_pdf_uses_docling_first(self):
         docling_rows = [("docling markdown", 0, [], "")]
