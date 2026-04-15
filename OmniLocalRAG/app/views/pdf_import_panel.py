@@ -1,4 +1,4 @@
-﻿"""
+﻿﻿"""
 PdfImportPanel - file import configuration dialog.
 
 Main features:
