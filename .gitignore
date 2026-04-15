@@ -29,4 +29,8 @@ Thumbs.db
 .gstack/
 build/
 dist/
+graphify-out/
+.graphify_python
+OmniLocalRAG/None
+cc-connect/
 

@@ -1,4 +1,4 @@
-﻿import os
+import os
 from html import escape as _html_escape
 from pathlib import Path
 from typing import Optional
@@ -12,9 +12,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
-    QSplitter,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -75,13 +73,7 @@ class SpotlightWindow(QWidget):
         self._user_resized = False
         self._window_width = int(cfg.get("ui.window_width", 1040))
         self._default_window_height = int(cfg.get("ui.window_height", 720))
-        self._results_panel_width = 372
-        self._compact_results_height = 248
-        self._responsive_breakpoint = 1040
-        self._selected_card: Optional[QWidget] = None
-        self._selected_result: Optional[dict] = None
         self._context_results: list = []
-        self._result_cards: list[QWidget] = []
         self._active_query = ""
 
         self._setup_flags()
@@ -112,21 +104,10 @@ class SpotlightWindow(QWidget):
         self._drag_handle = require_child(self, QLabel, "dragHandleLabel", "Spotlight UI")
         self._input = require_child(self, QLineEdit, "searchInput", "Spotlight UI")
         self._stop_btn = require_child(self, QPushButton, "stopButton", "Spotlight UI")
-        self._splitter = require_child(self, QSplitter, "resultSplitter", "Spotlight UI")
         self._timing_label = optional_child(self, QLabel, "timingLabel")
-        self._body = optional_child(self, QWidget, "bodyWidget") or self._splitter
-        self._results_panel = require_child(self, QWidget, "resultsPanel", "Spotlight UI")
-        self._cards_label = require_child(self, QLabel, "cardsLabel", "Spotlight UI")
-        self._cards_scroll = require_child(self, QScrollArea, "cardsScrollArea", "Spotlight UI")
-        self._cards_widget = require_child(self, QWidget, "cardsContainerWidget", "Spotlight UI")
-        self._cards_layout = self._cards_widget.layout()
-        self._cards_empty = require_child(self, QLabel, "cardsEmptyLabel", "Spotlight UI")
-        self._preview_panel = require_child(self, QWidget, "previewPanel", "Spotlight UI")
         self._knowledge_card = require_child(self, QFrame, "knowledgeCardFrame", "Spotlight UI")
         self._preview_title = require_child(self, QLabel, "previewTitleLabel", "Spotlight UI")
         self._preview_meta = optional_child(self, QLabel, "previewMetaLabel")
-        self._copy_ref_btn = require_child(self, QPushButton, "copyReferenceButton", "Spotlight UI")
-        self._open_source_btn = require_child(self, QPushButton, "openSourceButton", "Spotlight UI")
         answer_host = optional_child(self, QWidget, "answerHostWidget")
 
         # Keep legacy object names so the existing QSS keeps applying after .ui loading.
@@ -134,20 +115,43 @@ class SpotlightWindow(QWidget):
         self._drag_handle.setObjectName("SpotlightDragHandle")
         self._input.setObjectName("SearchInput")
         self._stop_btn.setObjectName("StopButton")
-        if self._timing_label is None:
-            self._timing_label = QLabel("", self._container)
-            self._timing_label.hide()
-            container_layout = self._container.layout()
-            if isinstance(container_layout, QVBoxLayout):
-                container_layout.insertWidget(2, self._timing_label)
+
+        # ── Heartbeat bar: pulse indicator + timing label ──
+        self._heartbeat_bar = QWidget(self._container)
+        self._heartbeat_bar.setObjectName("HeartbeatBar")
+        hb_layout = QHBoxLayout(self._heartbeat_bar)
+        hb_layout.setContentsMargins(8, 0, 8, 2)
+        hb_layout.setSpacing(6)
+
+        self._pulse_label = QLabel(self._heartbeat_bar)
+        self._pulse_label.setObjectName("PulseIndicator")
+        self._pulse_label.setFixedSize(10, 10)
+        self._pulse_label.hide()
+
+        self._timing_label = QLabel("", self._heartbeat_bar)
         self._timing_label.setObjectName("SearchTimingLabel")
-        self._body.setObjectName("ResultBody")
-        self._splitter.setObjectName("ResultSplitter")
-        self._results_panel.setObjectName("ResultPane")
-        self._preview_panel.setObjectName("ResultPane")
-        self._cards_label.setObjectName("ResultSectionLabel")
-        self._cards_scroll.setObjectName("CardsScroll")
-        self._cards_empty.setObjectName("ResultEmptyHint")
+
+        hb_layout.addWidget(self._pulse_label)
+        hb_layout.addWidget(self._timing_label, 1)
+        self._heartbeat_bar.hide()
+
+        # Insert heartbeat bar into container layout (replacing old timing label)
+        container_layout = self._container.layout()
+        if isinstance(container_layout, QVBoxLayout):
+            # Remove old timing label if it was in the layout
+            if self._timing_label is not None:
+                old_timing = optional_child(self, QLabel, "timingLabel")
+                if old_timing and old_timing.parent() == self._container:
+                    container_layout.removeWidget(old_timing)
+                    old_timing.setParent(None)
+            container_layout.insertWidget(2, self._heartbeat_bar)
+
+        # Pulse animation: cycle through dots to show activity
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(400)
+        self._pulse_step = 0
+        self._pulse_timer.timeout.connect(self._tick_pulse)
+
         self._knowledge_card.setObjectName("KnowledgeCard")
         self._preview_title.setObjectName("KnowledgeCardTitle")
         if self._preview_meta is None:
@@ -158,13 +162,8 @@ class SpotlightWindow(QWidget):
             if isinstance(card_layout, QVBoxLayout):
                 card_layout.insertWidget(1, self._preview_meta)
         self._preview_meta.setObjectName("KnowledgeCardMeta")
-        self._copy_ref_btn.setObjectName("KnowledgeActionButton")
-        self._open_source_btn.setObjectName("KnowledgeActionButton")
 
         self._drag_handle.setCursor(Qt.OpenHandCursor)
-        self._results_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        self._cards_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._preview_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._knowledge_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._preview_title.setWordWrap(True)
         self._preview_meta.setWordWrap(True)
@@ -186,24 +185,23 @@ class SpotlightWindow(QWidget):
         self._answer.setOpenExternalLinks(True)
         self._answer.setOpenLinks(False)
         self._answer.setSearchPaths(_build_content_search_paths())
+        self._answer.anchorClicked.connect(self._on_anchor_clicked)
+        # Set base font so zoomIn/zoomOut has a reference point
+        from PyQt5.QtGui import QFont
+        base_font = QFont()
+        base_font.setPointSize(12)
+        self._answer.setFont(base_font)
         answer_layout = answer_host.layout()
         answer_layout.addWidget(self._answer)
         self._answer_plain: str = ""
 
-        self._copy_ref_btn.clicked.connect(self._copy_selected_reference)
-        self._open_source_btn.clicked.connect(self._open_selected_source)
-
-        self._splitter.setStretchFactor(0, 4)
-        self._splitter.setStretchFactor(1, 7)
         self._sync_window_size(force=True)
         self.setMouseTracking(True)
         self._container.setMouseTracking(True)
-        self._body.setMouseTracking(True)
         self.installEventFilter(self)
         self._container.installEventFilter(self)
         self._drag_handle.installEventFilter(self)
         self._input.installEventFilter(self)
-        self._apply_responsive_layout(force=True)
         self._render_preview(streaming=False)
 
     def _connect_signals(self) -> None:
@@ -269,43 +267,10 @@ class SpotlightWindow(QWidget):
         self._apply_responsive_layout(force=True)
 
     def _update_body_visibility(self) -> None:
-        self._body.show()
-        self._results_panel.show()
-        self._preview_panel.show()
-        self._cards_empty.setVisible(not bool(self._context_results))
-        self._apply_responsive_layout()
+        self._knowledge_card.show()
 
     def _apply_responsive_layout(self, force: bool = False) -> None:
-        available_width = max(self.width() - 48, 640)
-        compact = available_width < self._responsive_breakpoint
-        target_orientation = Qt.Vertical if compact else Qt.Horizontal
-        orientation_changed = self._splitter.orientation() != target_orientation
-
-        if force or orientation_changed:
-            self._splitter.setOrientation(target_orientation)
-
-        if compact:
-            self._results_panel.setMinimumWidth(0)
-            self._results_panel.setMaximumWidth(16777215)
-            self._results_panel.setMinimumHeight(210)
-            self._results_panel.setMaximumHeight(self._compact_results_height)
-            self._preview_panel.setMinimumWidth(0)
-            self._preview_panel.setMinimumHeight(300)
-            if force or orientation_changed:
-                top_height = min(self._compact_results_height, max(210, int(self.height() * 0.34)))
-                self._splitter.setSizes([top_height, max(320, self.height() - top_height - 40)])
-        else:
-            self._results_panel.setFixedWidth(self._results_panel_width)
-            self._results_panel.setMinimumHeight(0)
-            self._results_panel.setMaximumHeight(16777215)
-            self._preview_panel.setMinimumWidth(420)
-            if force or orientation_changed:
-                self._splitter.setSizes(
-                    [
-                        self._results_panel_width,
-                        max(560, self.width() - self._results_panel_width - 52),
-                    ]
-                )
+        pass
 
     def _resize_hit_test(self, global_pos: QPoint) -> tuple[bool, bool, bool, bool]:
         local = self.mapFromGlobal(global_pos)
@@ -398,12 +363,13 @@ class SpotlightWindow(QWidget):
         self._active_query = query
         self._answer_plain = ""
         self._context_results = []
-        self._selected_result = None
         self._answer.clear()
-        self._clear_cards()
         self._render_preview(streaming=False)
-        self._timing_label.setText("\u6b63\u5728\u68c0\u7d22...")
-        self._timing_label.show()
+        self._timing_label.setText("检索中")
+        self._pulse_label.show()
+        self._pulse_step = 0
+        self._pulse_timer.start()
+        self._heartbeat_bar.show()
         self._stop_btn.show()
         self._cursor_timer.start()
         self._search_ctrl.search(query)
@@ -423,188 +389,136 @@ class SpotlightWindow(QWidget):
             self._render_preview(streaming=True)
 
     def _on_context(self, results: list) -> None:
-        from app.views.result_cards import build_card
-        self._clear_cards()
         self._context_results = list(results or [])
-        if not results:
-            self._render_preview(streaming=self._cursor_timer.isActive())
-            return
-        for idx, r in enumerate(results):
-            card = build_card(r, parent=self._cards_widget)
-            if card:
-                if hasattr(card, "set_best_match"):
-                    card.set_best_match(idx == 0)
-                if hasattr(card, "clicked"):
-                    card.clicked.connect(lambda _checked=False, c=card, result=r: self._select_result_card(c, result))
-                self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
-                self._result_cards.append(card)
-                if idx == 0:
-                    self._select_result_card(card, r)
-        self._update_body_visibility()
+        self._sync_result_ui()
+        self._render_preview(streaming=self._cursor_timer.isActive())
 
     def _on_timings(self, timings: dict) -> None:
         stage = str(timings.get("stage", "retrieval"))
-        retrieval_total = float(timings.get("retrieval_total_ms", 0.0))
-        embed_ms = float(timings.get("embed_ms", 0.0))
-        vector_ms = float(timings.get("vector_ms", 0.0))
+        route_ms = float(timings.get("route_ms", 0.0))
+        locate_ms = float(timings.get("locate_ms", 0.0))
+        validate_ms = float(timings.get("validate_ms", 0.0))
+        category = str(timings.get("category", "general"))
         hits = int(timings.get("hits", 0))
+        validated = timings.get("validated", False)
+
+        # Compact timing: route→locate→validate with ms
+        parts = [f"路由 {route_ms:.0f}ms", f"定位 {locate_ms:.0f}ms", f"验证 {validate_ms:.0f}ms"]
+
         if stage == "complete":
-            llm_load_ms = float(timings.get("llm_load_ms", 0.0))
             generation_ms = float(timings.get("generation_ms", 0.0))
             total_ms = float(timings.get("total_ms", 0.0))
-            self._timing_label.setText(
-                f"\u68c0\u7d22 {retrieval_total:.1f} ms  "
-                f"(\u7f16\u7801 {embed_ms:.1f} + \u5411\u91cf {vector_ms:.1f})  "
-                f"\u6a21\u578b {llm_load_ms:.1f} ms  "
-                f"\u751f\u6210 {generation_ms:.1f} ms  "
-                f"\u603b\u8017\u65f6 {total_ms:.1f} ms"
-            )
+            parts.append(f"生成 {generation_ms:.0f}ms")
+            parts.append(f"总耗时 {total_ms:.0f}ms")
+
+        # Category + hits summary
+        check = "✓" if validated else "✗"
+        parts.append(f"{category} · {hits}条{check}")
+
+        self._timing_label.setText(" → ".join(parts))
+        self._heartbeat_bar.show()
+
+        # Stop pulse when complete
+        if stage == "complete":
+            self._pulse_timer.stop()
+            self._pulse_label.setText("●")
+            self._pulse_label.setStyleSheet("color: #4caf50; font-size: 10px;")
+
+    def _tick_pulse(self) -> None:
+        """Animate the pulse indicator dot during search."""
+        self._pulse_step = (self._pulse_step + 1) % 4
+        dots = ["●", "◉", "●", "○"]
+        self._pulse_label.setText(dots[self._pulse_step])
+        # Alternate between bright and dim
+        if self._pulse_step % 2 == 0:
+            self._pulse_label.setStyleSheet("color: #4fc3f7; font-size: 10px;")
         else:
-            self._timing_label.setText(
-                f"\u68c0\u7d22 {retrieval_total:.1f} ms  "
-                f"(\u7f16\u7801 {embed_ms:.1f} + \u5411\u91cf {vector_ms:.1f})  "
-                f"\u547d\u4e2d {hits} \u6761"
-            )
-        self._timing_label.show()
+            self._pulse_label.setStyleSheet("color: #81d4fa; font-size: 10px;")
 
     def _on_finished(self, success: bool) -> None:
         self._cursor_timer.stop()
+        self._pulse_timer.stop()
+        self._pulse_label.setText("●")
+        self._pulse_label.setStyleSheet("color: #4caf50; font-size: 10px;")
         self._render_preview(streaming=False)
         self._answer.verticalScrollBar().setValue(0)
         self._stop_btn.hide()
 
     def _on_error(self, msg: str) -> None:
         self._cursor_timer.stop()
+        self._pulse_timer.stop()
+        self._pulse_label.setText("●")
+        self._pulse_label.setStyleSheet("color: #f44336; font-size: 10px;")
         self._answer_plain = f"[错误] {msg}"
         self._render_preview(streaming=False)
         self._stop_btn.hide()
-        self._timing_label.setText("\u68c0\u7d22\u5931\u8d25")
-        self._timing_label.show()
-
-    def _clear_cards(self) -> None:
-        self._selected_card = None
-        self._selected_result = None
-        for card in self._result_cards:
-            card.deleteLater()
-        self._result_cards = []
-        self._cards_label.setText("搜索结果")
-        self._sync_selected_result_ui()
-        self._update_body_visibility()
-
-    def _select_result_card(self, card: QWidget, result: dict) -> None:
-        if self._selected_card is card and self._selected_result == result:
-            return
-        if self._selected_card and hasattr(self._selected_card, "set_selected"):
-            self._selected_card.set_selected(False)
-        self._selected_card = card
-        self._selected_result = result
-        if hasattr(card, "set_selected"):
-            card.set_selected(True)
-        self._update_results_header()
-        self._scroll_card_into_view(card)
-        self._sync_selected_result_ui()
-        self._render_preview(streaming=self._cursor_timer.isActive())
-
-    def _update_results_header(self) -> None:
-        total = len(self._result_cards)
-        if total <= 0:
-            self._cards_label.setText("搜索结果")
-            return
-        self._cards_label.setText(f"搜索结果 · {total} 条")
-
-    def _scroll_card_into_view(self, card: QWidget) -> None:
-        if not card:
-            return
-        self._cards_scroll.ensureWidgetVisible(card, 0, 18)
-
-    def _move_result_selection(self, step: int) -> bool:
-        if not self._result_cards:
-            return False
-        try:
-            current = self._result_cards.index(self._selected_card) if self._selected_card else 0
-        except ValueError:
-            current = 0
-        next_index = max(0, min(len(self._result_cards) - 1, current + step))
-        next_card = self._result_cards[next_index]
-        next_result = self._context_results[next_index] if next_index < len(self._context_results) else None
-        if next_result is None:
-            return False
-        self._select_result_card(next_card, next_result)
-        return True
+        self._timing_label.setText("检索失败")
+        self._heartbeat_bar.show()
 
     def _render_preview(self, streaming: bool) -> None:
         self._update_body_visibility()
         if streaming:
             html = _build_preview_document(
                 answer_text=self._answer_plain,
-                selected_result=self._selected_result,
                 query_text=self._active_query,
                 show_cursor=self._cursor_visible,
+                context_results=self._context_results,
             )
             self._answer.setHtml(html)
             return
 
         html = _build_preview_document(
             answer_text=self._answer_plain,
-            selected_result=self._selected_result,
             query_text=self._active_query,
             show_cursor=False,
+            context_results=self._context_results,
         )
         if html:
             self._answer.setHtml(html)
         else:
             self._answer.clear()
 
-    def _sync_selected_result_ui(self) -> None:
-        result = self._selected_result
-        if not result:
+    def _sync_result_ui(self) -> None:
+        """Update title/meta/buttons based on context results."""
+        if not self._context_results:
             self._preview_title.setText("资料卡")
             self._preview_meta.hide()
-            self._copy_ref_btn.setEnabled(False)
-            self._open_source_btn.setEnabled(False)
             return
 
-        self._preview_title.setText(_result_title(result))
-        meta = _result_meta(result)
+        first = self._context_results[0]
+        hits = len(self._context_results)
+        self._preview_title.setText(f"搜索结果 · {hits} 条命中")
+        meta = _result_meta(first)
         if meta:
             self._preview_meta.setText(meta)
             self._preview_meta.show()
         else:
             self._preview_meta.hide()
-        self._copy_ref_btn.setEnabled(True)
-        self._open_source_btn.setEnabled(_resolve_source_path(result) is not None)
 
-    def _copy_selected_reference(self) -> None:
-        if not self._selected_result:
-            return
-        citation = _result_reference_text(self._selected_result)
-        QApplication.clipboard().setText(citation)
+    def _on_anchor_clicked(self, url) -> None:
+        """Handle clicks on anchor:// and video:// citation links."""
+        url_str = str(url.toEncoded(), "utf-8") if hasattr(url, "toEncoded") else str(url)
 
-    def _open_selected_source(self) -> None:
-        if not self._selected_result:
-            return
-        path = _resolve_source_path(self._selected_result)
-        if path is None:
-            return
-        try:
-            os.startfile(str(path))
-        except Exception as exc:
-            logger.error(f"Open source failed: {exc}")
+        if url_str.startswith("video://"):
+            clip_id = url_str[len("video://"):]
+            for result in self._context_results:
+                result_id = str(result.get("id") or "").strip()
+                if result_id == clip_id:
+                    path = _resolve_source_path(result)
+                    if path is not None:
+                        try:
+                            os.startfile(str(path))
+                        except Exception as exc:
+                            logger.error(f"Open video failed: {exc}")
+                    return
+            logger.debug(f"No video result found for clip_id: {clip_id}")
 
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self._input and event.type() == QEvent.KeyPress:
-            if event.key() == Qt.Key_Down and self._move_result_selection(1):
-                event.accept()
-                return True
-            if event.key() == Qt.Key_Up and self._move_result_selection(-1):
-                event.accept()
-                return True
-
-        if obj in (self, self._container, self._body):
+        if obj in (self, self._container):
             if event.type() == QEvent.MouseMove:
                 if self._resizing:
                     self._perform_resize(event.globalPos())
@@ -661,7 +575,15 @@ class SpotlightWindow(QWidget):
             super().keyPressEvent(event)
 
     def focusOutEvent(self, event) -> None:
-        self.hide_window()
+        # Only hide when focus leaves the application entirely.
+        # If focus moves to a child dialog (e.g. PreferencesDialog) or another
+        # widget within the same app, keep the spotlight visible.
+        reason = event.reason()
+        if reason in (QEvent.Mouse, QEvent.TabFocusReason, QEvent.BacktabFocusReason):
+            # User clicked outside or tabbed away — hide
+            self.hide_window()
+        # For ActiveWindowFocusReason / PopupFocusReason / WindowFocusReason,
+        # another window in the same app gained focus — keep visible
         super().focusOutEvent(event)
 
     def closeEvent(self, event) -> None:
@@ -682,6 +604,7 @@ import re as _re
 
 _MD_IMAGE_RE = _re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _MD_LINK_RE = _re.compile(r"\[(?P<label>[^\]]+)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_CITATION_RE = _re.compile(r"\[(\d+)\]")
 _CONTENT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -828,7 +751,7 @@ def _render_inline_markup(text: str, query_text: str = "") -> str:
 def _document_style() -> str:
     return """
     <style>
-      body { font-family: 'Microsoft YaHei UI', sans-serif; font-size: 14px;
+      body { font-family: 'Microsoft YaHei UI', sans-serif;
              color: #16202a; line-height: 1.65; }
       mark { background: rgba(124, 211, 183, 0.28); color: #16202a;
              padding: 0 2px; border-radius: 4px; }
@@ -848,12 +771,12 @@ def _document_style() -> str:
       .preview-block { margin: 0 0 18px 0; padding: 0 0 14px 0;
                        border-bottom: 1px solid rgba(15,23,32,0.08); }
       .preview-block:last-child { border-bottom: none; padding-bottom: 0; }
-      .preview-label { color: #1d4e89; font-size: 12px; font-weight: 700;
+      .preview-label { color: #1d4e89; font-size: 0.85em; font-weight: 700;
                        letter-spacing: 1px; margin: 0 0 8px 0; }
       .preview-answer { background: rgba(124,211,183,0.08);
                         border: 1px solid rgba(124,211,183,0.22);
                         border-radius: 14px; padding: 12px 14px; }
-      .preview-empty { color: #6a7785; font-size: 13px; margin: 8px 0; }
+      .preview-empty { color: #6a7785; font-size: 0.92em; margin: 8px 0; }
     </style>
     """
 
@@ -938,18 +861,6 @@ def _result_meta(result: Optional[dict]) -> str:
     return "  ·  ".join(parts)
 
 
-def _result_reference_text(result: dict) -> str:
-    anchor = str(result.get("anchor_id") or result.get("id") or "").strip()
-    title = _result_title(result)
-    meta = _result_meta(result)
-    chunks = [title]
-    if meta:
-        chunks.append(meta)
-    if anchor:
-        chunks.append(f"anchor_id={anchor}")
-    return " | ".join(chunks)
-
-
 def _resolve_source_path(result: Optional[dict]) -> Optional[Path]:
     """Resolve the best viewable file path for a search result.
 
@@ -1015,11 +926,34 @@ def _resolve_source_path(result: Optional[dict]) -> Optional[Path]:
     return None
 
 
-def _build_preview_document(answer_text: str, selected_result: Optional[dict], query_text: str, show_cursor: bool) -> str:
+def _link_citations(text: str, context_results: list) -> str:
+    """Replace [1], [2] etc. with clickable links to anchor_id/video_clip_id."""
+    if not context_results:
+        return text
+
+    def _replace(match):
+        idx = int(match.group(1)) - 1  # 0-based
+        if 0 <= idx < len(context_results):
+            result = context_results[idx]
+            anchor = result.get("anchor_id") or result.get("id") or ""
+            source_type = str(result.get("source_type", "")).lower()
+            if source_type == "video":
+                clip_id = result.get("id", "")
+                return f'<a href="video://{_html_escape(clip_id)}" style="color:#1d4e89;text-decoration:none;font-weight:600;">[{idx+1}]</a>'
+            if anchor:
+                return f'<a href="anchor://{_html_escape(anchor)}" style="color:#1d4e89;text-decoration:none;font-weight:600;">[{idx+1}]</a>'
+        return match.group(0)
+
+    return _CITATION_RE.sub(_replace, text)
+
+
+def _build_preview_document(answer_text: str, query_text: str, show_cursor: bool, context_results: list = None) -> str:
     sections = []
     answer_text = (answer_text or "").strip()
     if answer_text:
         answer_fragment = _plain_to_fragment(answer_text + ("▋" if show_cursor else ""), query_text)
+        if context_results:
+            answer_fragment = _link_citations(answer_fragment, context_results)
         sections.append(
             '<section class="preview-block preview-answer">'
             '<div class="preview-label">回答</div>'
@@ -1027,64 +961,67 @@ def _build_preview_document(answer_text: str, selected_result: Optional[dict], q
             '</section>'
         )
     else:
-        sections.append('<p class="preview-empty">正在等待回答生成…</p>' if show_cursor else '<p class="preview-empty">输入问题后，这里会在右侧显示回答。</p>')
+        sections.append('<p class="preview-empty">正在等待回答生成…</p>' if show_cursor else '<p class="preview-empty">输入问题后，这里会显示回答。</p>')
 
-    if selected_result:
-        payload = selected_result.get("pdf_payload") or {}
-        content = str(payload.get("display_content") or selected_result.get("document") or selected_result.get("content") or "").strip()
-        metadata = payload.get("metadata") or {}
-        semantic_description = str(metadata.get("semantic_description") or "").strip() if isinstance(metadata, dict) else ""
-        heading_path = str(payload.get("heading_path") or "").strip()
-        block_type = str(payload.get("block_type") or "").strip()
+    if context_results:
+        for i, result in enumerate(context_results, 1):
+            payload = result.get("pdf_payload") or {}
+            content = str(payload.get("display_content") or result.get("document") or result.get("content") or "").strip()
+            metadata = payload.get("metadata") or {}
+            semantic_description = str(metadata.get("semantic_description") or "").strip() if isinstance(metadata, dict) else ""
+            heading_path = str(payload.get("heading_path") or "").strip()
+            block_type = str(payload.get("block_type") or "").strip()
 
-        if content:
+            if not content:
+                continue
+
             body_parts = []
 
             # ── Heading breadcrumb ────────────────────────────────
             if heading_path:
-                # Render each path segment as a breadcrumb chain
                 segments = heading_path.split(" > ")
-                crumb_html = ' <span style="color:#8fa3b6;font-size:11px;">›</span> '.join(
+                crumb_html = ' <span style="color:#8fa3b6;font-size:0.78em;">›</span> '.join(
                     f'<span style="color:#5cb2e9;">{_html_escape(s)}</span>' for s in segments
                 )
                 body_parts.append(
-                    f'<p style="font-size:11px;color:#7890a3;margin:0 0 6px 0;">{crumb_html}</p>'
+                    f'<p style="font-size:0.78em;color:#7890a3;margin:0 0 6px 0;">{crumb_html}</p>'
                 )
 
             # ── Semantic description ──────────────────────────────
             if semantic_description:
                 body_parts.append(
-                    f'<p style="color:#516174;font-size:12px;font-style:italic;margin:0 0 8px 0;">'
+                    f'<p style="color:#516174;font-size:0.85em;font-style:italic;margin:0 0 8px 0;">'
                     f'{_html_escape(semantic_description)}</p>'
                 )
 
             # ── Main content (with image rendering) ──────────────
             body_parts.append(_plain_to_fragment(content, query_text))
 
-            # ── Source file link ──────────────────────────────────
-            file_name = str(payload.get("file") or "").strip()
-            page = payload.get("page", "")
-            source_path = _resolve_source_path(selected_result)
-            if source_path is not None:
-                uri = source_path.resolve().as_uri()
-                anchor = ""
-                if heading_path:
-                    # Generate a markdown anchor from the last heading segment
-                    last = heading_path.split(" > ")[-1]
-                    anchor = "#" + _re.sub(r"[^\w\u4e00-\u9fff-]", "", last.lower().replace(" ", "-"))
-                link_label = source_path.name
-                if page not in ("", None):
-                    link_label += f" · 第 {page} 页"
+            # ── Source trace (anchor_id / video_clip_id) ──────────
+            anchor_id = str(result.get("anchor_id") or "").strip()
+            result_id = str(result.get("id") or "").strip()
+            result_source_type = str(result.get("source_type") or "").lower()
+            trace_parts = []
+            if anchor_id:
+                trace_parts.append(
+                    f'<span style="color:#7890a3;">anchor_id:</span> '
+                    f'<a href="anchor://{_html_escape(anchor_id)}" style="color:#5cb2e9;">{_html_escape(anchor_id[:32])}</a>'
+                )
+            if result_source_type == "video" and result_id:
+                trace_parts.append(
+                    f'<span style="color:#7890a3;">video_clip_id:</span> '
+                    f'<a href="video://{_html_escape(result_id)}" style="color:#5cb2e9;">{_html_escape(result_id[:32])}</a>'
+                )
+            if trace_parts:
                 body_parts.append(
-                    f'<p style="margin:10px 0 0 0;font-size:11px;">'
-                    f'<a href="{_html_escape(uri + anchor)}" style="color:#5cb2e9;">📄 在文档中查看：{_html_escape(link_label)}</a>'
-                    f'</p>'
+                    f'<p style="margin:8px 0 0 0;font-size:0.72em;">'
+                    + ' &nbsp;|&nbsp; '.join(trace_parts)
+                    + '</p>'
                 )
 
             full_body = "\n".join(body_parts)
             sections.append(
                 '<section class="preview-block">'
-                '<div class="preview-label">命中内容</div>'
                 f'{full_body}'
                 '</section>'
             )

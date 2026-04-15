@@ -39,20 +39,6 @@ CHECKS: List[CheckItem] = [
         download_url="https://huggingface.co/bartowski/gemma-2-2b-it-GGUF",
     ),
     CheckItem(
-        label="BGE-M3 Embedding 模型",
-        path=cfg.get("embed.model_path", "models/bge-m3"),
-        download_url="https://huggingface.co/BAAI/bge-m3",
-        # These files must exist inside the model directory.
-        # If any is absent, sentence-transformers would fall back to a network
-        # download, which we want to prevent entirely.
-        required_children=[
-            "pytorch_model.bin",
-            "tokenizer.json",
-            "config.json",
-            "modules.json",
-        ],
-    ),
-    CheckItem(
         label="VectorStore 数据目录",
         path="data/vectors",
         auto_create=True,

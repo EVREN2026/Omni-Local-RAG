@@ -2,9 +2,9 @@
   "llm": {
     "enabled": true,
     "model_path": "models\\gemma-4-2b-it-q4_k_m.gguf",
-    "n_gpu_layers": 0,
-    "n_ctx": 6144,
-    "max_tokens": 512,
+    "n_gpu_layers": 200,
+    "n_ctx": 32768,
+    "max_tokens": 4096,
     "temperature": 0.55,
     "repeat_penalty": 1.08,
     "top_k": 30,
@@ -18,12 +18,12 @@
     "server_dir": "models\\llama-b8757-bin-win-cuda-13.1-x64",
     "host": "127.0.0.1",
     "port": 8000,
-    "n_gpu_layers": 0,
-    "ctx_size": 6144,
+    "n_gpu_layers": 999,
+    "ctx_size": 120000,
     "threads": -1,
-    "parallel": 2,
-    "batch_size": 1024,
-    "ubatch_size": 512,
+    "parallel": 0,
+    "batch_size": 0,
+    "ubatch_size": 0,
     "flash_attn": true,
     "no_mmap": true,
     "numa": "distribute",
@@ -31,20 +31,16 @@
     "auto_download": true,
     "startup_timeout": 180
   },
-  "embed": {
-    "model_path": "models/bge-m3",
-    "device": "cpu",
-    "backend": "auto",
-    "batch_size": 12,
-    "max_length": 8192,
-    "sparse_top_k": 96
-  },
   "retrieval": {
     "top_k": 5,
-    "distance_threshold": 0.72,
-    "mode": "hybrid",
-    "hybrid_dense_weight": 0.55,
-    "hybrid_sparse_weight": 0.45
+    "distance_threshold": 0.72
+  },
+  "router": {
+    "enabled": true,
+    "memory_window": 5,
+    "few_shot_examples": true,
+    "category_filter_enabled": true,
+    "max_validate_retries": 3
   },
   "qa_memory": {
     "enabled": true,
@@ -62,36 +58,19 @@
   },
   "pdf": {
     "parser_order": [
-      "docling",
-      "unstructured",
-      "mineru",
-      "marker",
-      "ocr"
+      "marker"
     ],
     "marker_device": "cuda",
-    "mineru_cmd": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\OmniLocalRAG\\tools\\mineru-venv\\Scripts\\mineru.exe",
     "index_on_import": false,
-    "ocr_lang": "chi_sim+eng",
     "parser_options": {
-      "docling": {},
-      "unstructured": {
-        "strategy": "auto",
-        "languages": "eng,chi_sim"
-      },
-      "mineru": {
-        "command": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\OmniLocalRAG\\tools\\mineru-venv\\Scripts\\mineru.exe",
-        "extra_args": ""
-      },
       "marker": {
         "device": "cuda"
-      },
-      "ocr": {
-        "lang": "chi_sim+eng",
-        "scale": 2
       }
     },
-    "start_page": 0,
-    "end_page": 0
+    "start_page": 1,
+    "end_page": 5,
+    "ocr_lang": "chi_sim+eng",
+    "mineru_cmd": "mineru"
   },
   "asr": {
     "subprocess": true,

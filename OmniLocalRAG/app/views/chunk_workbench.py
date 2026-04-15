@@ -11,10 +11,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
-    QHBoxLayout,
     QHeaderView,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -22,7 +20,6 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -31,6 +28,7 @@ from app.models.stable_ids import stable_chunk_id
 from app.utils import config as cfg
 from app.utils.logger import logger
 from app.models.chunker import coerce_chunk_item, markdown_to_items as _markdown_to_items
+from app.utils.ui_loader import load_ui, require_child
 
 
 class ChunkWorkbench(QWidget):
@@ -46,47 +44,37 @@ class ChunkWorkbench(QWidget):
         self._load_params()
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(8)
+        load_ui(self, "chunk_workbench.ui")
 
-        top = QHBoxLayout()
-        self._file_label = QLabel("No markdown selected")
+        self._file_label = require_child(self, QLabel, "fileLabel", "ChunkWorkbench UI")
+        self._import_md_btn = require_child(self, QPushButton, "importMarkdownButton", "ChunkWorkbench UI")
+        self._start_chunk_btn = require_child(self, QPushButton, "startChunkButton", "ChunkWorkbench UI")
+        self._min_section_chars = require_child(self, QSpinBox, "minSectionCharsSpin", "ChunkWorkbench UI")
+        self._keep_heading_cb = require_child(self, QCheckBox, "keepHeadingCheckBox", "ChunkWorkbench UI")
+        self._status = require_child(self, QLabel, "statusLabel", "ChunkWorkbench UI")
+        self._chunk_table = require_child(self, QTableWidget, "chunkTable", "ChunkWorkbench UI")
+
+        # Insert slider+spinbox rows into host widgets from .ui
+        max_chars_host = require_child(self, QWidget, "maxCharsHostWidget", "ChunkWorkbench UI")
+        overlap_chars_host = require_child(self, QWidget, "overlapCharsHostWidget", "ChunkWorkbench UI")
+
+        self._max_chars_spin = _insert_slider_spin_row(max_chars_host, 400, 4000, 100)
+        self._overlap_chars_spin = _insert_slider_spin_row(overlap_chars_host, 0, 800, 50)
+
+        # Apply dynamic properties
         self._file_label.setStyleSheet("color: #aaa; font-size: 11px;")
-        top.addWidget(self._file_label)
-        top.addStretch()
-        self._import_md_btn = QPushButton("导入Markdown")
-        self._import_md_btn.clicked.connect(self._import_markdown_file)
-        self._start_chunk_btn = QPushButton("启动切块")
-        self._start_chunk_btn.clicked.connect(self._on_start_chunking)
-        top.addWidget(self._import_md_btn)
-        top.addWidget(self._start_chunk_btn)
-        root.addLayout(top)
-
-        param_group = QGroupBox("分块参数")
-        form = QFormLayout(param_group)
-        self._max_chars_spin, max_row = _slider_spin_row(400, 4000, 100)
-        self._overlap_chars_spin, overlap_row = _slider_spin_row(0, 800, 50)
-        self._min_section_chars = QSpinBox()
         self._min_section_chars.setRange(20, 500)
         self._min_section_chars.setSingleStep(10)
-        self._keep_heading_cb = QCheckBox("保留标题路径前缀 (keep_heading_path)")
-        form.addRow("最大字符数 (max_chars):", max_row)
-        form.addRow("重叠字符数 (overlap_chars):", overlap_row)
-        form.addRow("最小段落长度 (min_section_chars):", self._min_section_chars)
-        form.addRow("", self._keep_heading_cb)
-        root.addWidget(param_group)
 
-        self._status = QLabel("等待导入 Markdown 并启动切块")
-        root.addWidget(self._status)
-
-        self._chunk_table = QTableWidget()
         self._chunk_table.setColumnCount(5)
         self._chunk_table.setHorizontalHeaderLabels(["#", "页", "Heading path", "Block", "内容预览"])
         self._chunk_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self._chunk_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self._chunk_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        root.addWidget(self._chunk_table, 1)
+
+        # Connect signals
+        self._import_md_btn.clicked.connect(self._import_markdown_file)
+        self._start_chunk_btn.clicked.connect(self._on_start_chunking)
 
     def load_file(self, file_path: str, source_type: str = "pdf") -> None:
         self._current_file = file_path
@@ -270,10 +258,12 @@ class ChunkWorkbench(QWidget):
         return re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._") or "document"
 
 
-def _slider_spin_row(min_val: int, max_val: int, step: int):
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
+def _insert_slider_spin_row(host: QWidget, min_val: int, max_val: int, step: int) -> QSpinBox:
+    """Insert a slider+spinbox row into the host widget's existing layout."""
+    layout = host.layout()
+    if layout is None:
+        layout = QHBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
 
     slider = QSlider(Qt.Horizontal)
     slider.setRange(min_val, max_val)
@@ -290,4 +280,4 @@ def _slider_spin_row(min_val: int, max_val: int, step: int):
     spin.valueChanged.connect(slider.setValue)
     layout.addWidget(slider)
     layout.addWidget(spin)
-    return spin, container
+    return spin

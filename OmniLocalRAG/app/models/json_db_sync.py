@@ -1,5 +1,8 @@
 """
-Synchronise .chunks.json (L2) <-> VectorStore (L3).
+Synchronise .chunks.json (L2) <-> ChromaStore (L3).
+
+Embedding logic has been removed — the store now uses heading_path and
+category for LLM-directed retrieval instead of vector similarity.
 """
 
 from __future__ import annotations
@@ -10,8 +13,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from app.models.chroma_store import ChromaStore
-from app.models.embed_manager import EmbedManager
 from app.utils import config as cfg
+from app.utils.category_keywords import heuristic_category
 from app.utils.logger import logger
 
 
@@ -38,7 +41,7 @@ def _scan_all_chunks(source_file: str) -> List[Dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            "SELECT id, content, pdf_payload, source_type, is_manual FROM vectors"
+            "SELECT id, content, pdf_payload, source_type, is_manual, category, heading_path FROM vectors"
         ).fetchall()
     finally:
         conn.close()
@@ -76,34 +79,18 @@ def _db_payload(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _chunk_changed(chunk: Dict[str, Any], existing: Dict[str, Any]) -> bool:
-    """Return True when the chunk's content or embedding_text has materially
-    changed compared to what is stored in the vector DB.
-
-    Previous behaviour: return True unconditionally when is_manual=True.
-    This caused every sync of UV.chunks.json (all 236 chunks have is_manual=True)
-    to re-embed every chunk even when nothing changed — wasting ~30-120s of CPU.
-
-    New behaviour:
-    - Compare content text first (fast path).
-    - Compare embedding_text stored in the DB payload (covers heading_path /
-      semantic_description changes produced by the chunker).
-    - Only force re-embed when user explicitly marks a chunk with
-      ``user_edited: true`` (a new opt-in field distinct from is_manual).
-      The legacy ``is_manual`` flag now controls *how* the record is stored
-      (INSERT OR REPLACE vs UPDATE) but no longer forces re-embedding.
-    """
+    """Return True when the chunk's content has materially changed."""
     # 1. Content text changed
     if str(chunk.get("content", "")).strip() != str(existing.get("content", "")).strip():
         return True
 
-    # 2. embedding_text changed (captures heading_path / semantic_description edits)
-    db_payload = _db_payload(existing)
-    stored_embedding_text = str(db_payload.get("embedding_text", "")).strip()
-    current_embedding_text = str(chunk.get("embedding_text", chunk.get("content", ""))).strip()
-    if stored_embedding_text and current_embedding_text != stored_embedding_text:
+    # 2. heading_path changed
+    existing_heading = str(existing.get("heading_path", "") or "").strip()
+    chunk_heading = str(chunk.get("heading_path", "") or "").strip()
+    if chunk_heading and chunk_heading != existing_heading:
         return True
 
-    # 3. Explicit user edit flag (opt-in, distinct from is_manual)
+    # 3. Explicit user edit flag
     if bool(chunk.get("user_edited", False)):
         return True
 
@@ -121,14 +108,8 @@ def sync_json_to_db(
     source_file = data.get("source_file", json_path.stem)
     total = len(chunks)
 
-    embed = EmbedManager()
-    if hasattr(embed, "load") and not getattr(embed, "is_loaded", False):
-        if not embed.load():
-            raise RuntimeError(
-                f"Embedding model failed to load: {getattr(embed, 'last_error', '')}"
-            )
-
     chroma = ChromaStore()
+    chroma.connect()
     db_chunks = _fetch_db_chunks(source_file)
 
     counts = {"inserted": 0, "updated": 0, "deleted": 0, "skipped": 0, "errors": 0}
@@ -138,7 +119,6 @@ def sync_json_to_db(
     for index, chunk in enumerate(chunks):
         chunk_id = chunk.get("chunk_id") or chunk.get("anchor_id", "")
         content = str(chunk.get("content", "")).strip()
-        embedding_text = str(chunk.get("embedding_text", content)).strip() or content
         if not content or not chunk_id:
             counts["skipped"] += 1
             continue
@@ -148,49 +128,36 @@ def sync_json_to_db(
         existing = db_chunks.get(chunk_id)
         payload = _chunk_payload_from_json(source_file, chunk)
 
+        # Infer category from source file + heading + content
+        heading_path = str(chunk.get("heading_path", "") or "").strip()
+        category_blob = f"{source_file} {heading_path} {content[:300]}"
+        chunk_category = heuristic_category(category_blob)
+
         try:
             if existing is None:
-                sparse_payload = None
-                embed_backend = getattr(embed, "backend", "")
-                if hasattr(embed, "encode_payloads"):
-                    [embedding_payload] = embed.encode_payloads([embedding_text], return_sparse=True)
-                    vec = list(embedding_payload.get("dense") or [])
-                    sparse_payload = embedding_payload.get("sparse") or None
-                else:
-                    [vec] = embed.encode([embedding_text])
                 chroma.add(
                     content=content,
-                    embedding=vec,
                     source_type=str(chunk.get("source_type", data.get("source_type", "markdown"))),
                     anchor_id=chunk_id,
                     pdf_payload=payload,
-                    sparse_payload=sparse_payload,
-                    embed_backend=embed_backend,
                     is_manual=is_manual,
                     doc_id=chunk_id,
+                    category=chunk_category,
+                    heading_path=heading_path,
                 )
                 counts["inserted"] += 1
                 logger.info(f"json_db_sync: inserted chunk {chunk_id}")
             elif _chunk_changed(chunk, existing):
-                sparse_payload = None
-                embed_backend = getattr(embed, "backend", "")
-                if hasattr(embed, "encode_payloads"):
-                    [embedding_payload] = embed.encode_payloads([embedding_text], return_sparse=True)
-                    vec = list(embedding_payload.get("dense") or [])
-                    sparse_payload = embedding_payload.get("sparse") or None
-                else:
-                    [vec] = embed.encode([embedding_text])
                 chroma.update(
                     chunk_id,
                     content,
-                    vec,
                     extra_meta={
                         "source_type": str(chunk.get("source_type", data.get("source_type", "markdown"))),
                         "anchor_id": chunk_id,
                         "pdf_payload": payload,
-                        "sparse_payload": sparse_payload,
-                        "embed_backend": embed_backend,
                         "is_manual": is_manual,
+                        "category": chunk_category,
+                        "heading_path": heading_path,
                     },
                 )
                 counts["updated"] += 1
@@ -240,13 +207,12 @@ def export_db_to_json(source_file: str, output_path: str | Path) -> Path:
                 "source_type": row.get("source_type", "markdown"),
                 "page": payload.get("page", 0),
                 "coords": payload.get("coords", []),
-                "heading_path": payload.get("heading_path", ""),
+                "heading_path": row.get("heading_path", "") or payload.get("heading_path", ""),
                 "block_type": payload.get("block_type", "text"),
                 "content": row.get("content", ""),
                 "display_content": payload.get("display_content", row.get("content", "")),
                 "embedding_text": payload.get("embedding_text", row.get("content", "")),
                 "metadata": payload.get("metadata", {}),
-                "vector_dim": None,
                 "stored": True,
                 "is_manual": bool(row.get("is_manual", False)),
             }

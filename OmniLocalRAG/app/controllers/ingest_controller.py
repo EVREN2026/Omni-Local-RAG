@@ -5,7 +5,6 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal
 from app.workers.ingest_worker import IngestWorker
 from app.workers.asr_worker import ASRWorker
 from app.models.chroma_store import ChromaStore
-from app.models.embed_manager import EmbedManager
 from app.models.sqlite_store import SQLiteStore
 from app.utils.logger import logger
 
@@ -37,30 +36,13 @@ class _ClipIngestWorker(QThread):
 
     def run(self) -> None:
         try:
-            embed = EmbedManager()
-            if hasattr(embed, "load") and not getattr(embed, "is_loaded", False):
-                if not embed.load():
-                    detail = getattr(embed, "last_error", "") or "Check PyTorch / sentence-transformers"
-                    self.error_occurred.emit(f"Embedding 模型加载失败：{detail}")
-                    self.finished.emit(self.clip_id, False)
-                    return
-
             text = (
                 f"[视频切片] 文件: {self.video_file}\n"
                 f"时间: {self.start_sec:.2f}s - {self.end_sec:.2f}s\n"
                 f"摘要: {self.semantic_summary}"
             )
-            sparse_payload = None
-            embed_backend = getattr(embed, "backend", "")
-            if hasattr(embed, "encode_payloads"):
-                [embedding_payload] = embed.encode_payloads([text], return_sparse=True)
-                vec = list(embedding_payload.get("dense") or [])
-                sparse_payload = embedding_payload.get("sparse") or None
-            else:
-                [vec] = embed.encode([text])
             ChromaStore().add(
                 content=text,
-                embedding=vec,
                 source_type="video",
                 anchor_id=self.clip_id,
                 video_payload={
@@ -68,8 +50,6 @@ class _ClipIngestWorker(QThread):
                     "start": self.start_sec,
                     "end": self.end_sec,
                 },
-                sparse_payload=sparse_payload,
-                embed_backend=embed_backend,
                 is_manual=True,
                 doc_id=self.clip_id,
             )
@@ -77,7 +57,7 @@ class _ClipIngestWorker(QThread):
             self.finished.emit(self.clip_id, True)
         except Exception as e:
             logger.error(f"_ClipIngestWorker failed: {e}", exc_info=True)
-            self.error_occurred.emit(f"视频切片向量化失败: {e}")
+            self.error_occurred.emit(f"视频切片存储失败: {e}")
             self.finished.emit(self.clip_id, False)
 
 
@@ -125,10 +105,6 @@ class IngestController(QObject):
         self._ingest_worker.page_progress.connect(self.page_progress)
         self._ingest_worker.parse_done.connect(self.parse_done)
         self._ingest_worker.start()
-
-    def re_embed_chunk(self, chunk_id: str, new_content: str) -> None:
-        """Hot-update one chunk; runs inline (called from edit workbench after save)."""
-        IngestWorker("").re_embed(chunk_id, new_content)
 
     def transcribe_video(self, video_path: str) -> None:
         if self._asr_worker and self._asr_worker.isRunning():

@@ -1,10 +1,12 @@
 """
-IngestWorker — chunks a document, embeds it, and stores results.
-Supports manual document parsing (docling/unstructured/mineru/marker/ocr),
-plus manual video clip ingestion.
+IngestWorker — chunks a document and stores results.
+Supports marker PDF parsing plus manual video clip ingestion.
 
 Chunking logic lives in app.models.chunker (public API); this module
-delegates to it and adds QThread signals + PDF page-image export.
+delegates to it and adds QThread signals.
+
+Embedding logic has been removed — the store now uses heading_path and
+category for LLM-directed retrieval instead of vector similarity.
 """
 
 import re
@@ -22,28 +24,14 @@ from app.models.chunker import (
     _parse_markdown_heading,
     markdown_to_items,
 )
-from app.models.embed_manager import EmbedManager
 from app.models.stable_ids import stable_chunk_id
 from app.parsers.document_parsers import PARSER_REGISTRY
 from app.utils import config as cfg
+from app.utils.category_keywords import heuristic_category
 from app.utils.logger import logger
 
-_MAX_CHUNK_TOKENS = 512
-_OVERLAP_TOKENS = 64
 _DEFAULT_MARKDOWN_MAX_CHARS = 1800
 _DEFAULT_MARKDOWN_OVERLAP_CHARS = 240
-_PAGE_IMAGE_SCALE = 1.5
-
-
-def _rough_split(text: str, max_tokens: int = _MAX_CHUNK_TOKENS, overlap: int = _OVERLAP_TOKENS) -> List[str]:
-    """Naive whitespace-based splitter (replace with tiktoken for production)."""
-    words = text.split()
-    chunks, start = [], 0
-    while start < len(words):
-        end = start + max_tokens
-        chunks.append(" ".join(words[start:end]))
-        start = end - overlap
-    return chunks
 
 
 def _parse_pdf(file_path: str):
@@ -59,11 +47,11 @@ def _parse_pdf(file_path: str):
 
 
 def _pdf_parser_order() -> List[str]:
-    order = cfg.get("pdf.parser_order", ["docling", "unstructured", "mineru", "marker", "ocr"])
+    order = cfg.get("pdf.parser_order", ["marker"])
     if not isinstance(order, list):
-        return ["docling", "unstructured", "mineru", "marker", "ocr"]
+        return ["marker"]
     normalized = [str(name).strip().lower() for name in order if str(name).strip()]
-    return normalized or ["docling", "unstructured", "mineru", "marker", "ocr"]
+    return normalized or ["marker"]
 
 
 def _selected_parser_name() -> str:
@@ -81,90 +69,20 @@ def _converted_markdown_path(source_file: str) -> Path:
     return root / "pdf" / f"{_safe_export_stem(source_file)}.converted.md"
 
 
-def _converted_image_dir(source_file: str) -> Path:
-    md_path = _converted_markdown_path(source_file)
-    return md_path.with_name(f"{_safe_export_stem(source_file)}_images")
-
-
-def _markdown_has_image_link(markdown: str) -> bool:
-    md_pattern = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-    html_pattern = re.compile(r"<img[^>]+src=[\"'][^\"']+[\"']", re.IGNORECASE)
-    return bool(md_pattern.search(markdown) or html_pattern.search(markdown))
-
-
-def _inject_page_images_if_needed(markdown: str, image_dir_name: str, total_pages: int) -> str:
-    if not markdown.strip():
-        return markdown
-    if _markdown_has_image_link(markdown):
-        return markdown
-
-    marker_pattern = re.compile(r"<!--\s*page:\s*(\d+)\s*-->", re.IGNORECASE)
-    matched = False
-
-    def _replace_marker(match: re.Match) -> str:
-        nonlocal matched
-        matched = True
-        page_no = int(match.group(1))
-        image_rel = f"{image_dir_name}/page_{page_no:04d}.png"
-        return f"{match.group(0)}\n\n![page_{page_no}]({image_rel})"
-
-    updated = marker_pattern.sub(_replace_marker, markdown)
-    if matched:
-        return updated
-
-    if total_pages <= 0:
-        return markdown
-    pages = [
-        f"<!-- page: {page_no} -->\n\n![page_{page_no}]({image_dir_name}/page_{page_no:04d}.png)"
-        for page_no in range(1, total_pages + 1)
-    ]
-    return markdown.rstrip() + "\n\n" + "\n\n".join(pages)
-
-
-def _export_pdf_page_images(source_file: str, image_dir: Path, scale: float = _PAGE_IMAGE_SCALE) -> int:
-    """Export PDF pages as PNG and return count."""
-    import fitz  # type: ignore
-
-    image_dir.mkdir(parents=True, exist_ok=True)
-    count = 0
-    doc = fitz.open(source_file)
-    try:
-        for idx, page in enumerate(doc, start=1):
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
-            out = image_dir / f"page_{idx:04d}.png"
-            pix.save(str(out))
-            count += 1
-    finally:
-        doc.close()
-    return count
-
-
 def _markdown_to_items(markdown: str) -> List[tuple]:
     """Delegate to the public chunker API (app.models.chunker)."""
     return markdown_to_items(markdown)
 
 
 # Thin wrappers kept for any external callers that imported these directly.
-# They delegate to chunker.py.
 from app.models.chunker import (  # noqa: E402
     _split_markdown_section,
     _find_markdown_boundary,
 )
 
 
-def _docling_items_to_chunks(doc):
-    """Legacy Docling block extraction kept for older local installations."""
-    results = []
-    for item in doc.iterate_items():
-        text = getattr(item, "text", "") or ""
-        page = getattr(item, "page_no", 0) or 0
-        if text.strip():
-            results.append((text.strip(), page, [], ""))
-    return results
-
-
 class IngestWorker(QThread):
-    progress = pyqtSignal(int, int)            # (current, total) embed progress
+    progress = pyqtSignal(int, int)            # (current, total) progress
     chunk_indexed = pyqtSignal(str)            # chunk_id
     finished = pyqtSignal(bool)
     error_occurred = pyqtSignal(str)
@@ -183,7 +101,6 @@ class IngestWorker(QThread):
         if suffix in {".md", ".markdown"}:
             self._ingest_markdown()
         else:
-            # Generic file import: parser backend is selected manually by config.
             self._ingest_pdf()
 
     def _ingest_pdf(self) -> None:
@@ -211,7 +128,6 @@ class IngestWorker(QThread):
             raise RuntimeError(f"Unknown parser: {parser_name}")
 
         md_path = _converted_markdown_path(file_path)
-        image_dir = _converted_image_dir(file_path)
 
         # Emit total page count once (requires fitz; skip silently if unavailable)
         try:
@@ -226,15 +142,6 @@ class IngestWorker(QThread):
 
         self.stage_changed.emit(f"Parsing with {parser_name}...")
         markdown = parser.to_markdown(file_path)
-
-        exported_pages = 0
-        try:
-            exported_pages = _export_pdf_page_images(file_path, image_dir)
-        except Exception as e:
-            logger.warning(f"Page image export skipped: {e}")
-
-        if exported_pages > 0:
-            markdown = _inject_page_images_if_needed(markdown, image_dir.name, exported_pages)
 
         if total_pages:
             self.page_progress.emit(total_pages, total_pages)
@@ -271,7 +178,6 @@ class IngestWorker(QThread):
 
     def _ingest_items(self, items: List[tuple], source_type: str, index_vectors: bool = True) -> None:
         self.stage_changed.emit("Chunking...")
-        embed = EmbedManager() if index_vectors else None
         chroma = ChromaStore() if index_vectors else None
 
         chunks: List[dict] = []
@@ -279,91 +185,66 @@ class IngestWorker(QThread):
         for item in items:
             chunk_item = coerce_chunk_item(item)
             legacy_text = chunk_item.legacy_text
-            raw_parts = [legacy_text] if source_type == "markdown" else _rough_split(legacy_text)
-            for part_text in raw_parts:
-                if not part_text.strip():
-                    continue
-                if len(raw_parts) == 1:
-                    display_content = chunk_item.display_content
-                    embedding_text = chunk_item.embedding_text
-                else:
-                    display_content = part_text
-                    embedding_text = part_text
+            # No more rough_split — chunker handles splitting
+            display_content = chunk_item.display_content
+            embedding_text = chunk_item.embedding_text
 
-                chunk_id = stable_chunk_id(
-                    source_file=self.file_path,
-                    source_type=source_type,
-                    page=chunk_item.page,
-                    heading_path=chunk_item.heading_path,
-                    content=display_content,
-                    used_ids=used_ids,
-                )
-                chunks.append(
-                    {
-                        "id": chunk_id,
-                        "content": display_content.strip(),
-                        "display_content": display_content.strip(),
-                        "embedding_text": (embedding_text or display_content).strip(),
-                        "page": chunk_item.page,
-                        "coords": chunk_item.coords,
-                        "heading_path": chunk_item.heading_path,
-                        "block_type": chunk_item.block_type if len(raw_parts) == 1 else "text",
-                        "metadata": dict(chunk_item.metadata or {}),
-                    }
-                )
+            chunk_id = stable_chunk_id(
+                source_file=self.file_path,
+                source_type=source_type,
+                page=chunk_item.page,
+                heading_path=chunk_item.heading_path,
+                content=display_content,
+                used_ids=used_ids,
+            )
+            chunks.append(
+                {
+                    "id": chunk_id,
+                    "content": display_content.strip(),
+                    "display_content": display_content.strip(),
+                    "embedding_text": (embedding_text or display_content).strip(),
+                    "page": chunk_item.page,
+                    "coords": chunk_item.coords,
+                    "heading_path": chunk_item.heading_path,
+                    "block_type": chunk_item.block_type,
+                    "metadata": dict(chunk_item.metadata or {}),
+                }
+            )
 
         total = len(chunks)
         logger.info(f"IngestWorker: {total} {source_type} chunks from {self.file_path}")
 
-        if index_vectors:
-            if hasattr(embed, "load") and not getattr(embed, "is_loaded", False):
-                if not embed.load():
-                    detail = getattr(embed, "last_error", "") or "Check PyTorch / sentence-transformers setup"
-                    self.error_occurred.emit(f"Embedding model load failed: {detail}")
-                    self.finished.emit(False)
-                    return
-            self.stage_changed.emit(f"Embedding {total} chunk(s)...")
-        else:
-            self.stage_changed.emit(f"Converted, exporting {total} chunk(s)...")
+        self.stage_changed.emit(f"Storing {total} chunk(s)...")
 
         export_rows: List[dict] = []
         for i, chunk in enumerate(chunks):
             try:
-                vector_dim = None
                 stored = False
-                if index_vectors:
-                    sparse_payload = None
-                    embed_backend = getattr(embed, "backend", "")
-                    if hasattr(embed, "encode_payloads"):
-                        [embedding_payload] = embed.encode_payloads(
-                            [chunk.get("embedding_text") or chunk["content"]],
-                            return_sparse=True,
-                        )
-                        vec = list(embedding_payload.get("dense") or [])
-                        sparse_payload = embedding_payload.get("sparse") or None
-                    else:
-                        [vec] = embed.encode([chunk.get("embedding_text") or chunk["content"]])
-                    vector_dim = len(vec)
+                if index_vectors and chroma is not None:
+                    heading_path = chunk.get("heading_path", "")
+                    content = chunk["content"]
+                    category_blob = f"{Path(self.file_path).name} {heading_path} {content[:300]}"
+                    chunk_category = heuristic_category(category_blob)
+
                     payload = {
                         "file": str(Path(self.file_path).name),
                         "page": chunk["page"],
                         "coords": chunk["coords"],
-                        "heading_path": chunk.get("heading_path", ""),
+                        "heading_path": heading_path,
                         "block_type": chunk.get("block_type", "text"),
                         "display_content": chunk.get("display_content", chunk["content"]),
                         "embedding_text": chunk.get("embedding_text", chunk["content"]),
                         "metadata": chunk.get("metadata", {}),
                     }
                     chroma.add(
-                        content=chunk["content"],
-                        embedding=vec,
+                        content=content,
                         source_type=source_type,
                         anchor_id=chunk["id"],
                         pdf_payload=payload,
-                        sparse_payload=sparse_payload,
-                        embed_backend=embed_backend,
                         is_manual=False,
                         doc_id=chunk["id"],
+                        category=chunk_category,
+                        heading_path=heading_path,
                     )
                     self.chunk_indexed.emit(chunk["id"])
                     stored = True
@@ -381,7 +262,6 @@ class IngestWorker(QThread):
                         "display_content": chunk.get("display_content", chunk["content"]),
                         "embedding_text": chunk.get("embedding_text", chunk["content"]),
                         "metadata": chunk.get("metadata", {}),
-                        "vector_dim": vector_dim,
                         "stored": stored,
                         "is_manual": False,
                     }
@@ -390,8 +270,7 @@ class IngestWorker(QThread):
                 logger.error(f"Chunk ingest failed: {e}", exc_info=True)
 
         if total and not export_rows:
-            detail = getattr(embed, "last_error", "") or "Check PyTorch / sentence-transformers setup"
-            self.error_occurred.emit(f"Embedding generation failed: {detail}")
+            self.error_occurred.emit("Chunk storage failed")
             self.finished.emit(False)
             return
 
@@ -408,30 +287,3 @@ class IngestWorker(QThread):
 
         self.stage_changed.emit("导入完成")
         self.finished.emit(True)
-
-    def re_embed(self, chunk_id: str, new_content: str) -> None:
-        """Hot-update a single chunk (called from EditController, runs in same thread)."""
-        embed = EmbedManager()
-        chroma = ChromaStore()
-        try:
-            sparse_payload = None
-            embed_backend = getattr(embed, "backend", "")
-            if hasattr(embed, "encode_payloads"):
-                [embedding_payload] = embed.encode_payloads([new_content], return_sparse=True)
-                vec = list(embedding_payload.get("dense") or [])
-                sparse_payload = embedding_payload.get("sparse") or None
-            else:
-                [vec] = embed.encode([new_content])
-            chroma.update(
-                chunk_id,
-                new_content,
-                vec,
-                extra_meta={
-                    "sparse_payload": sparse_payload,
-                    "embed_backend": embed_backend,
-                },
-            )
-            logger.info(f"re_embed: chunk {chunk_id} updated")
-        except Exception as e:
-            logger.error(f"re_embed failed: {e}", exc_info=True)
-

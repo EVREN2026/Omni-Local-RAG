@@ -3,10 +3,9 @@
 Interactive local model pipeline test.
 
 Behavior:
-1. Load BGE-M3 once
-2. Connect VectorStore once
-3. Load Gemma via llama-server once
-4. Enter an interactive chat loop and show per-turn timings
+1. Connect ChromaStore once
+2. Load Gemma via llama-server once
+3. Enter an interactive chat loop and show per-turn timings
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.models.chroma_store import ChromaStore
-from app.models.embed_manager import EmbedManager
 from app.models.llama_server_manager import LlamaServerManager
 from app.models.llm_http_client import LLMHttpClient
 from app.models.llm_manager import LLMManager
@@ -92,22 +90,16 @@ def _messages_for_turn(
     return messages
 
 
-def _startup(args: argparse.Namespace) -> tuple[EmbedManager, ChromaStore | None, LLMManager, dict[str, float]]:
+def _startup(args: argparse.Namespace) -> tuple[ChromaStore | None, LLMManager, dict[str, float]]:
     timings: dict[str, float] = {}
-
-    embed = EmbedManager()
-    t0 = time.perf_counter()
-    if not embed.load():
-        raise RuntimeError(f"BGE-M3 failed to load: {embed.last_error}")
-    timings["embed_load"] = round((time.perf_counter() - t0) * 1000, 1)
 
     store: ChromaStore | None = None
     if not args.no_retrieval:
         store = ChromaStore()
         t0 = time.perf_counter()
         if not store.connect():
-            raise RuntimeError("VectorStore failed to connect")
-        timings["vector_store_connect"] = round((time.perf_counter() - t0) * 1000, 1)
+            raise RuntimeError("ChromaStore failed to connect")
+        timings["store_connect"] = round((time.perf_counter() - t0) * 1000, 1)
 
     llm = LLMManager()
     t0 = time.perf_counter()
@@ -115,13 +107,12 @@ def _startup(args: argparse.Namespace) -> tuple[EmbedManager, ChromaStore | None
         raise RuntimeError(f"Gemma llama-server failed to load: {llm.last_error}")
     timings["llm_load"] = round((time.perf_counter() - t0) * 1000, 1)
 
-    return embed, store, llm, timings
+    return store, llm, timings
 
 
 def _run_turn(
     query: str,
     args: argparse.Namespace,
-    embed: EmbedManager,
     store: ChromaStore | None,
     client: LLMHttpClient,
     history: list[dict[str, str]],
@@ -134,23 +125,11 @@ def _run_turn(
     }
 
     results: list[dict[str, Any]] = []
-    query_vector_dim = 0
 
     if not args.no_retrieval and store is not None:
         t0 = time.perf_counter()
-        query_sparse = None
-        if hasattr(embed, "encode_payloads"):
-            [query_payload] = embed.encode_payloads([query], return_sparse=True)
-            q_vec = list(query_payload.get("dense") or [])
-            query_sparse = query_payload.get("sparse") or None
-        else:
-            [q_vec] = embed.encode([query])
-        report["timings_ms"]["embed_query"] = round((time.perf_counter() - t0) * 1000, 1)
-        query_vector_dim = len(q_vec)
-
-        t0 = time.perf_counter()
-        results = store.query(q_vec, n_results=args.top_k, query_text=query, query_sparse=query_sparse)
-        report["timings_ms"]["vector_query"] = round((time.perf_counter() - t0) * 1000, 1)
+        results = store.search_text(query, limit=args.top_k)
+        report["timings_ms"]["text_query"] = round((time.perf_counter() - t0) * 1000, 1)
 
     messages = _messages_for_turn(
         query=query,
@@ -168,7 +147,6 @@ def _run_turn(
     answer = str(llm_data.get("text", "") or "")
     report["answer"] = answer
     report["answer_chars"] = len(answer)
-    report["query_vector_dim"] = query_vector_dim
     report["retrieved_count"] = len(results)
     report["retrieved_sources"] = [
         {
@@ -247,16 +225,16 @@ def _print_turn(report: dict[str, Any], args: argparse.Namespace) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Interactive BGE-M3 + Gemma local chat test")
+    parser = argparse.ArgumentParser(description="Interactive Gemma local chat test with text retrieval")
     parser.add_argument("--top-k", type=int, default=5, help="Number of retrieved chunks to include")
-    parser.add_argument("--no-retrieval", action="store_true", help="Skip vector retrieval and chat with Gemma only")
+    parser.add_argument("--no-retrieval", action="store_true", help="Skip retrieval and chat with Gemma only")
     parser.add_argument("--max-history-turns", type=int, default=2, help="How many previous user+assistant turns to keep")
     parser.add_argument("--text-limit", type=int, default=300, help="Preview limit for retrieved chunk text")
     parser.add_argument("--json", action="store_true", help="Print each turn as JSON")
     args = parser.parse_args()
 
     try:
-        embed, store, _llm, startup = _startup(args)
+        store, _llm, startup = _startup(args)
     except Exception as exc:
         print(f"Startup failed: {exc}", file=sys.stderr)
         return 1
@@ -283,7 +261,7 @@ def main() -> int:
             print("History cleared.")
             continue
 
-        turn = _run_turn(query, args, embed, store, client, history)
+        turn = _run_turn(query, args, store, client, history)
         if args.json:
             print(json.dumps(turn, ensure_ascii=False, indent=2))
         else:

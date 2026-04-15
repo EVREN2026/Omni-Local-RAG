@@ -81,10 +81,6 @@ def _fresh_worker(file_path="/fake/doc.pdf"):
     sys.modules["PyQt5.QtCore"] = qtcore
 
     # --- stub heavy deps so they don't need real numpy / chroma ---
-    embed_mod = types.ModuleType("app.models.embed_manager")
-    embed_mod.EmbedManager = MagicMock
-    sys.modules["app.models.embed_manager"] = embed_mod
-
     chroma_mod = types.ModuleType("app.models.chroma_store")
     chroma_mod.ChromaStore = MagicMock
     sys.modules["app.models.chroma_store"] = chroma_mod

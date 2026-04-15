@@ -1,6 +1,5 @@
 from PyQt5.QtCore import QObject, QTimer
 
-from app.models.embed_manager import EmbedManager
 from app.models.llm_manager import LLMManager
 from app.utils import config as cfg
 from app.utils.logger import logger
@@ -10,7 +9,6 @@ class MemoryWatcher(QObject):
     """
     Monitors idle time. When the Spotlight window has been hidden for
     idle_timeout_minutes, unloads the LLM to reclaim memory.
-    BGE-M3 (EmbedManager) is intentionally kept resident.
     """
 
     _instance = None

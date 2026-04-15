@@ -21,14 +21,6 @@ class DummyQThread:
         pass
 
 
-class FakeEmbedManager:
-    encode_calls = []
-
-    def encode(self, texts):
-        self.__class__.encode_calls.extend(texts)
-        return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
-
-
 class FakeChromaStore:
     add_calls = []
 
@@ -53,10 +45,6 @@ def install_import_stubs():
     sys.modules["PyQt5"] = pyqt5
     sys.modules["PyQt5.QtCore"] = qtcore
 
-    embed_module = types.ModuleType("app.models.embed_manager")
-    embed_module.EmbedManager = FakeEmbedManager
-    sys.modules["app.models.embed_manager"] = embed_module
-
     chroma_module = types.ModuleType("app.models.chroma_store")
     chroma_module.ChromaStore = FakeChromaStore
     sys.modules["app.models.chroma_store"] = chroma_module
@@ -67,7 +55,6 @@ class PdfVectorExportTest(unittest.TestCase):
         install_import_stubs()
         sys.modules.pop("app.workers.ingest_worker", None)
         self.ingest_worker = importlib.import_module("app.workers.ingest_worker")
-        FakeEmbedManager.encode_calls = []
         FakeChromaStore.add_calls = []
 
         from app.utils import config as cfg
@@ -98,7 +85,6 @@ class PdfVectorExportTest(unittest.TestCase):
             worker._ingest_pdf()
 
         self.assertEqual(len(FakeChromaStore.add_calls), 0)
-        self.assertEqual(len(FakeEmbedManager.encode_calls), 0)
 
         converted_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.converted.md"
         json_path = Path(self.temp_dir.name) / "data" / "exports" / "pdf" / "sample.chunks.json"
@@ -170,7 +156,6 @@ class PdfVectorExportTest(unittest.TestCase):
         worker._ingest_markdown()
 
         self.assertGreater(len(FakeChromaStore.add_calls), 1)
-        self.assertEqual(len(FakeEmbedManager.encode_calls), len(FakeChromaStore.add_calls))
         for add_call in FakeChromaStore.add_calls:
             self.assertEqual(add_call["source_type"], "markdown")
             self.assertTrue(add_call["anchor_id"])

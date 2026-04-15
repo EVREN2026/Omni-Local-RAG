@@ -49,12 +49,6 @@
       <item row="7" column="0"><widget class="QLabel" name="idleTimeoutLabel"><property name="text"><string>空闲卸载超时:</string></property></widget></item>
       <item row="7" column="1"><widget class="QSpinBox" name="idleTimeoutSpin"/></item>
      </layout></widget>
-     <widget class="QWidget" name="embedTab"><attribute name="title"><string>嵌入模型</string></attribute><layout class="QFormLayout" name="embedFormLayout">
-      <item row="0" column="0"><widget class="QLabel" name="embedModelPathLabel"><property name="text"><string>模型目录:</string></property></widget></item>
-      <item row="0" column="1"><widget class="QLineEdit" name="embedModelPathEdit"/></item>
-      <item row="1" column="0"><widget class="QLabel" name="embedDeviceLabel"><property name="text"><string>运行设备:</string></property></widget></item>
-      <item row="1" column="1"><widget class="QComboBox" name="embedDeviceCombo"/></item>
-     </layout></widget>
      <widget class="QWidget" name="retrievalTab"><attribute name="title"><string>检索</string></attribute><layout class="QFormLayout" name="retrievalFormLayout">
       <item row="0" column="0"><widget class="QLabel" name="topKLabel"><property name="text"><string>Top-K:</string></property></widget></item>
       <item row="0" column="1"><widget class="QSpinBox" name="topKSpin"/></item>

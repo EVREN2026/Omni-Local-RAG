@@ -5,8 +5,6 @@ llm_manager.py — LLM 推理入口（llama-server HTTP 模式）。
   • 对话/生成模型：由 LlamaServerManager 启动本地 llama-server.exe HTTP 服务，
     通过 LLMHttpClient 调用 OpenAI-compatible /v1/chat/completions API。
     完全不再使用 llama-cpp-python 加载对话模型。
-  • 嵌入模型（BGE-M3）：仍由 embed_manager.py 通过 sentence-transformers 加载，
-    不受本文件影响。
 
 公共接口与旧版保持兼容：
   • LLMManager().load()          → 启动 llama-server（如未运行）
@@ -74,6 +72,7 @@ class LLMManager:
             return False
 
         t0 = time.perf_counter()
+        logger.info(f"正在启动 llama-server (模型: {model_path})...")
         ok = mgr.ensure_started(model_path)
         elapsed = (time.perf_counter() - t0) * 1000
 

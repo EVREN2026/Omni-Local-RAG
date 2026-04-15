@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>KnowledgeEditor</class>
  <widget class="QMainWindow" name="KnowledgeEditor">
@@ -99,69 +99,6 @@
     </item>
     <item>
      <widget class="QTabWidget" name="tabsWidget"/>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="crossModalGroup">
-      <property name="title">
-       <string>跨模态对齐绑定</string>
-      </property>
-      <layout class="QHBoxLayout" name="crossModalLayout">
-       <item>
-        <widget class="QLabel" name="clipLabel">
-         <property name="text">
-          <string>视频切片:</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="clipCombo">
-         <property name="minimumSize">
-          <size>
-           <width>200</width>
-           <height>0</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="anchorLabel">
-         <property name="text">
-          <string>关联文档锚点:</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="anchorCombo">
-         <property name="minimumSize">
-          <size>
-           <width>260</width>
-           <height>0</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="bindButton">
-         <property name="text">
-          <string>绑定</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <spacer name="crossModalSpacer">
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>40</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-      </layout>
-     </widget>
     </item>
    </layout>
   </widget>

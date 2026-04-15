@@ -22,7 +22,7 @@ QMenu {
     font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC",
                  "Source Han Sans CN", "Segoe UI", sans-serif;
     font-size: 13px;
-    color: #e7edf2;
+    color: #1a1a1a;
     background-color: rgba(18, 22, 30, 240);
     border: 1px solid rgba(255, 255, 255, 22);
     border-radius: 10px;
@@ -33,16 +33,16 @@ QMenu::item {
     padding: 7px 28px 7px 18px;
     border-radius: 6px;
     margin: 1px 4px;
-    color: #e7edf2;
+    color: #1a1a1a;
 }
 
 QMenu::item:selected {
     background: rgba(92, 178, 233, 0.22);
-    color: #f0f8ff;
+    color: #0a0a0a;
 }
 
 QMenu::item:disabled {
-    color: rgba(231, 237, 242, 0.35);
+    color: rgba(26, 26, 26, 0.35);
 }
 
 QMenu::separator {
@@ -56,25 +56,6 @@ QMenu::separator {
     background-color: rgba(12, 16, 24, 214);
     border: 1px solid rgba(255, 255, 255, 34);
     border-radius: 30px;
-}
-
-#ResultBody {
-    background: transparent;
-}
-
-#ResultSectionLabel {
-    color: #8fd9c2;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    padding: 2px 8px 0 8px;
-}
-
-#ResultPane {
-    background: rgba(255, 255, 255, 8);
-    border: 1px solid rgba(255, 255, 255, 12);
-    border-radius: 22px;
-    padding: 10px;
 }
 
 #KnowledgeCard {
@@ -92,17 +73,6 @@ QMenu::separator {
 #KnowledgeCardMeta {
     color: #516174;
     font-size: 12px;
-}
-
-#ResultSplitter::handle {
-    background: rgba(255, 255, 255, 10);
-    width: 8px;
-    margin: 12px 2px;
-    border-radius: 4px;
-}
-
-#ResultSplitter::handle:hover {
-    background: rgba(124, 211, 183, 46);
 }
 
 #SpotlightDragHandle {
@@ -154,7 +124,6 @@ QMenu::separator {
     border-radius: 18px;
     padding: 16px 18px;
     color: #0f1720;
-    font-size: 15px;
     line-height: 1.7;
     min-height: 140px;
     max-height: 720px;
@@ -165,70 +134,7 @@ QMenu::separator {
     width: 8px;
 }
 
-/* ── Cards scroll area ───────────────────────────────────── */
-#CardsScroll {
-    border: none;
-    background: transparent;
-    padding-top: 2px;
-}
-
-#ResultEmptyHint {
-    color: #7f94a7;
-    font-size: 13px;
-    line-height: 1.6;
-    padding: 10px 8px 4px 8px;
-}
-
-/* ── Result cards ────────────────────────────────────────── */
-#ResultListCard {
-    background: rgba(255, 255, 255, 8);
-    border: 1px solid rgba(255, 255, 255, 10);
-    border-radius: 18px;
-}
-
-#ResultListCard:hover {
-    background: rgba(255, 255, 255, 12);
-    border: 1px solid rgba(255, 255, 255, 18);
-}
-
-#ResultListCard[bestMatch="true"] {
-    background: rgba(92, 178, 233, 0.14);
-    border: 1px solid rgba(92, 178, 233, 0.24);
-}
-
-#ResultListCard[selected="true"] {
-    background: rgba(92, 178, 233, 32);
-    border: 1px solid rgba(92, 178, 233, 120);
-}
-
-#ResultListTitle {
-    color: #f7fbff;
-    font-size: 15px;
-    font-weight: 600;
-}
-
-#ResultSummary {
-    color: #9ab0c3;
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-#ResultMeta {
-    color: #7890a3;
-    font-size: 11px;
-}
-
-#ResultSourceTag {
-    background: rgba(12, 16, 24, 0.44);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 999px;
-    color: #dbe5ef;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 2px 10px;
-}
-
-#KnowledgeActionButton {
+/* ── Answer / streaming text area ───────────────────────── */
     background: rgba(15, 23, 32, 0.06);
     border: 1px solid rgba(15, 23, 32, 0.10);
     border-radius: 12px;
@@ -442,8 +348,17 @@ QSplitter::handle {
 }
 
 
+#HeartbeatBar {
+    background: transparent;
+}
+
+#PulseIndicator {
+    font-size: 10px;
+    color: #4fc3f7;
+}
+
 #SearchTimingLabel {
     color: #9ab7c9;
     font-size: 12px;
-    padding: 0 8px 2px 8px;
+    padding: 0 4px 2px 0;
 }

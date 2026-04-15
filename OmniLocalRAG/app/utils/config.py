@@ -39,20 +39,16 @@ _DEFAULT: dict = {
         "auto_download":    True,                        # 找不到时从 GitHub 下载
         "startup_timeout":  180,
     },
-    "embed": {
-        "model_path": "models/bge-m3",
-        "device": "cpu",
-        "backend": "auto",
-        "batch_size": 12,
-        "max_length": 8192,
-        "sparse_top_k": 96,
-    },
     "retrieval": {
         "top_k": 5,
         "distance_threshold": 0.7,
-        "mode": "hybrid",
-        "hybrid_dense_weight": 0.65,
-        "hybrid_sparse_weight": 0.35,
+    },
+    "router": {
+        "enabled": True,
+        "memory_window": 5,
+        "few_shot_examples": True,
+        "category_filter_enabled": True,
+        "max_validate_retries": 3,
     },
     "qa_memory": {
         "enabled": True,
@@ -67,16 +63,11 @@ _DEFAULT: dict = {
         "min_section_chars": 80,   # minimum body length for a section to be its own chunk
     },
     "pdf": {
-        "parser_order": ["docling", "unstructured", "mineru", "marker", "ocr"],
+        "parser_order": ["marker"],
         "marker_device": "cpu",
-        "mineru_cmd": "mineru",
         "index_on_import": False,
         "parser_options": {
-            "docling": {},
-            "unstructured": {"strategy": "auto", "languages": "eng,chi_sim"},
-            "mineru": {"command": "mineru", "extra_args": ""},
             "marker": {"device": "cpu"},
-            "ocr": {"lang": "chi_sim+eng", "scale": 2},
         },
     },
     "asr": {

@@ -771,6 +771,10 @@ def _build_embedding_text(display_content: str, heading_path: str, block_type: s
     heading_path = _nfkc(heading_path)
     tags: List[str] = []
     if heading_path:
+        if " > " in heading_path:
+            root = heading_path.split(" > ", 1)[0].strip()
+            if root and root != heading_path:
+                tags.append(f"[Path: {root}]")
         tags.append(f"[Path: {heading_path}]")
     tags.append(f"[Type: {block_type}]")
     title = _nfkc(str(metadata.get("title") or "")).strip()

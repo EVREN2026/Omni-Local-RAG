@@ -28,7 +28,6 @@ from PyQt5.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSpinBox,
-    QLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -82,6 +81,11 @@ class PdfImportPanel(QDialog):
 
     def selected_file(self) -> Optional[str]:
         return self._file_path
+
+    @staticmethod
+    def _safe_set_text(widget: object, text: str) -> None:
+        if hasattr(widget, "setText"):
+            widget.setText(text)
 
     def _build(self) -> None:
         load_ui(self, "pdf_import_panel.ui")
@@ -188,7 +192,7 @@ class PdfImportPanel(QDialog):
     def _update_parser_intro_panel(self, parser_name: str) -> None:
         parser = PARSER_REGISTRY.get(parser_name)
         if parser is None:
-            self._parser_intro_title.setText("未找到解析器")
+            self._safe_set_text(self._parser_intro_title, "未找到解析器")
             return
 
         info = _PARSER_TECH_INFO.get(parser_name, {})
@@ -198,15 +202,31 @@ class PdfImportPanel(QDialog):
         schema = parser.parameter_schema()
         param_labels = "、".join([p.label for p in schema]) if schema else "无"
 
-        self._parser_intro_title.setText(f"{parser.display_name} ({parser_name})")
-        self._parser_intro_text.setText(f"技术说明: {intro}")
-        self._parser_intro_image.setText(f"是否生成图像数据: {image_data}")
-        self._parser_intro_basic.setText(f"基础信息: {basic}\n可配置参数: {param_labels}")
+        self._safe_set_text(self._parser_intro_title, f"{parser.display_name} ({parser_name})")
+        self._safe_set_text(self._parser_intro_text, f"技术说明: {intro}")
+        self._safe_set_text(self._parser_intro_image, f"是否生成图像数据: {image_data}")
+        self._safe_set_text(self._parser_intro_basic, f"基础信息: {basic}\n可配置参数: {param_labels}")
 
     def _current_parser_name(self) -> str:
         row = self._parser_list.currentRow()
         item = self._parser_list.item(row)
         return item.text() if item else (_ALL_PARSERS[0] if _ALL_PARSERS else "")
+
+    def _move_parser_up(self) -> None:
+        row = int(self._parser_list.currentRow())
+        if row <= 0:
+            return
+        item = self._parser_list.takeItem(row)
+        self._parser_list.insertItem(row - 1, item)
+        self._parser_list.setCurrentRow(row - 1)
+
+    def _move_parser_down(self) -> None:
+        row = int(self._parser_list.currentRow())
+        if row < 0 or row >= self._parser_list.count() - 1:
+            return
+        item = self._parser_list.takeItem(row)
+        self._parser_list.insertItem(row + 1, item)
+        self._parser_list.setCurrentRow(row + 1)
 
     def _load_parser_options_from_config(self) -> None:
         for parser_name in _ALL_PARSERS:

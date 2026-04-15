@@ -99,12 +99,7 @@ class DoclingParser(BaseDocumentParser):
             return md_text
 
         except Exception as e:
-            print(f"[WARNING] Docling 解析异常: {e}")
-            print(f"[INFO] 正在尝试 PyMuPDF 高级兜底（包含文本+图像）...")
-            
-            # 强化版兜底：即使 Docling 报错，我也帮你把图和文字拿出来
-            md_text = self._pymupdf_fallback_with_images(file_path, out_dir)
-            return md_text
+            raise RuntimeError(f"Docling 解析失败: {e}")
 
     @staticmethod
     def _convert_docling_inline(file_path: str, out_dir: str) -> str:
@@ -176,39 +171,6 @@ except Exception as e:
         if md_file.exists():
             return md_file.read_text(encoding="utf-8")
         raise RuntimeError("Docling 子进程未产生 document.md")
-
-    def _pymupdf_fallback_with_images(self, file_path: str, out_dir: Path) -> str:
-        """高级兜底方案：使用 PyMuPDF 提取文本并保存页面为图片"""
-        import fitz
-        from PIL import Image
-        import io
-
-        md_parts = []
-        img_dir = out_dir / "images"
-        img_dir.mkdir(exist_ok=True)
-
-        try:
-            doc = fitz.open(file_path)
-            for page in doc:
-                # 1. 提取文字
-                text = page.get_text("text").strip()
-                if text:
-                    md_parts.append(f"## Page {page.number + 1}\n\n{text}")
-                
-                # 2. 提取并保存当前页为图像（模拟图像数据产出）
-                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                img.save(img_dir / f"page_render_{page.number + 1}.png")
-            
-            doc.close()
-            
-            final_md = "\n\n".join(md_parts)
-            (out_dir / "document_fallback.md").write_text(final_md, encoding="utf-8")
-            return final_md
-            
-        except Exception as e:
-            return f"PyMuPDF 兜底也失败了: {e}"
-
 
 
 class MarkerParser(BaseDocumentParser):
@@ -379,11 +341,7 @@ class OcrParser(BaseDocumentParser):
 
 
 PARSER_REGISTRY: Dict[str, BaseDocumentParser] = {
-    "docling": DoclingParser(),
-    "unstructured": UnstructuredParser(),
-    "mineru": MinerUParser(),
     "marker": MarkerParser(),
-    "ocr": OcrParser(),
 }
 
 def available_parser_names() -> List[str]:

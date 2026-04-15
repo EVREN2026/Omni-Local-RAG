@@ -55,9 +55,6 @@ class PreferencesDialog(QDialog):
         self._llm_repeat_penalty = require_child(self, QDoubleSpinBox, "llmRepeatPenaltySpin", "PreferencesDialog UI")
         self._idle_timeout = require_child(self, QSpinBox, "idleTimeoutSpin", "PreferencesDialog UI")
 
-        self._embed_model_path = require_child(self, QLineEdit, "embedModelPathEdit", "PreferencesDialog UI")
-        self._embed_device = require_child(self, QComboBox, "embedDeviceCombo", "PreferencesDialog UI")
-
         self._top_k = require_child(self, QSpinBox, "topKSpin", "PreferencesDialog UI")
         self._distance_threshold = require_child(self, QDoubleSpinBox, "distanceThresholdSpin", "PreferencesDialog UI")
 
@@ -95,8 +92,6 @@ class PreferencesDialog(QDialog):
         self._llm_repeat_penalty.setDecimals(2)
         self._idle_timeout.setRange(1, 120)
         self._idle_timeout.setSuffix(" 分钟")
-
-        self._embed_device.addItems(["cpu", "cuda"])
 
         self._top_k.setRange(1, 50)
         self._distance_threshold.setRange(0.0, 1.0)
@@ -151,9 +146,6 @@ class PreferencesDialog(QDialog):
         self._llm_repeat_penalty.setValue(float(cfg.get("llm.repeat_penalty", 1.1)))
         self._idle_timeout.setValue(int(cfg.get("idle_timeout_minutes", 10)))
 
-        self._embed_model_path.setText(str(cfg.get("embed.model_path", "")))
-        self._embed_device.setCurrentText(str(cfg.get("embed.device", "cpu")))
-
         self._top_k.setValue(int(cfg.get("retrieval.top_k", 5)))
         self._distance_threshold.setValue(float(cfg.get("retrieval.distance_threshold", 0.7)))
 
@@ -200,9 +192,6 @@ class PreferencesDialog(QDialog):
             _set(existing, "llm", "temperature", value=self._llm_temperature.value())
             _set(existing, "llm", "repeat_penalty", value=self._llm_repeat_penalty.value())
             _set(existing, "idle_timeout_minutes", value=self._idle_timeout.value())
-
-            _set(existing, "embed", "model_path", value=self._embed_model_path.text().strip())
-            _set(existing, "embed", "device", value=self._embed_device.currentText())
 
             _set(existing, "retrieval", "top_k", value=self._top_k.value())
             _set(existing, "retrieval", "distance_threshold", value=self._distance_threshold.value())

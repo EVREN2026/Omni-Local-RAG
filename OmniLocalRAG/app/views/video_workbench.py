@@ -1,4 +1,4 @@
-﻿import os
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -8,12 +8,17 @@ from PyQt5.QtCore import Qt, pyqtSignal, QUrl
 from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
 from PyQt5.QtWidgets import (
+    QDialog,
     QInputDialog,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -33,6 +38,7 @@ class VideoWorkbench(QWidget):
         self._video_path: Optional[str] = None
         self._duration_sec = 0.0
         self._segments: List[dict] = []
+        self._clips: List[dict] = []
         self._mark_in: Optional[float] = None
         self._mark_out: Optional[float] = None
         self._player_failed = False
@@ -61,7 +67,21 @@ class VideoWorkbench(QWidget):
         self._timeline = _TimelineWidget(self)
         self._timeline.setMinimumHeight(80)
         self._timeline.position_clicked.connect(self._seek_to)
+        self._timeline.selection_changed.connect(self._on_timeline_selection)
         timeline_layout.addWidget(self._timeline)
+
+        # Subtitle overlay label
+        self._subtitle_label = QLabel("", self)
+        self._subtitle_label.setObjectName("SubtitleLabel")
+        self._subtitle_label.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 180);"
+            "color: #ffffff;"
+            "font-size: 14px;"
+            "padding: 4px 12px;"
+            "border-radius: 4px;"
+        )
+        self._subtitle_label.setAlignment(Qt.AlignCenter)
+        self._subtitle_label.hide()
 
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
@@ -87,9 +107,26 @@ class VideoWorkbench(QWidget):
         self._ingest.asr_progress.connect(self._on_asr_progress)
         self._ingest.asr_finished.connect(self._on_asr_finished)
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._reposition_subtitle()
+
+    def _reposition_subtitle(self) -> None:
+        """Position subtitle label at the bottom center of the timeline area."""
+        if self._timeline and self._subtitle_label:
+            geo = self._timeline.geometry()
+            sub_h = 32
+            self._subtitle_label.setGeometry(
+                geo.x() + 20,
+                geo.bottom() - sub_h - 6,
+                geo.width() - 40,
+                sub_h,
+            )
+
     def load_video(self, video_path: str) -> None:
         self._video_path = video_path
         self._segments = []
+        self._clips = []
         self._mark_in = None
         self._mark_out = None
         self._player_failed = False
@@ -108,7 +145,9 @@ class VideoWorkbench(QWidget):
             self.clips_loaded.emit([])
             return
         clips = SQLiteStore().get_clips_by_video(Path(self._video_path).name)
+        self._clips = clips
         self._clip_list_label.setText(f"已标记片段：{len(clips)} 个")
+        self._timeline.set_clips(clips)
         self.clips_loaded.emit(clips)
 
     def _on_asr_segment(self, seg: dict) -> None:
@@ -136,10 +175,37 @@ class VideoWorkbench(QWidget):
     def _seek_to(self, sec: float) -> None:
         self._player.setPosition(int(sec * 1000))
 
+    def _on_timeline_selection(self, start_sec: float, end_sec: float) -> None:
+        """Update mark in/out from timeline drag selection."""
+        self._mark_in = start_sec
+        self._mark_out = end_sec
+        self._update_mark_label()
+
     def _on_position_changed(self, ms: int) -> None:
         sec = ms / 1000
         self._pos_label.setText(_fmt(sec))
         self._timeline.set_playhead(sec)
+        self._update_subtitle(sec)
+
+    def _update_subtitle(self, sec: float) -> None:
+        """Show ASR transcript text matching current playback position."""
+        if not self._segments:
+            self._subtitle_label.hide()
+            return
+        text = ""
+        for seg in self._segments:
+            if seg.get("is_clip"):
+                continue
+            start = seg.get("start", 0)
+            end = seg.get("end", 0)
+            if start <= sec <= end:
+                text = seg.get("text", "").strip()
+                break
+        if text:
+            self._subtitle_label.setText(text)
+            self._subtitle_label.show()
+        else:
+            self._subtitle_label.hide()
 
     def _on_duration_changed(self, ms: int) -> None:
         self._duration_sec = ms / 1000
@@ -149,7 +215,7 @@ class VideoWorkbench(QWidget):
         if status == QMediaPlayer.InvalidMedia:
             self._player_failed = True
             self._play_btn.setEnabled(False)
-            self._status.setText("播放器不支持该视频编码。可使用“外部播放”或转码为 H264/AAC MP4。")
+            self._status.setText('播放器不支持该视频编码。可使用\u201c外部播放\u201d或转码为 H264/AAC MP4。')
 
     def _on_player_error(self, *args) -> None:
         code = args[0] if args else None
@@ -157,7 +223,7 @@ class VideoWorkbench(QWidget):
         logger.error(f"Video player error: code={code}, message={message or 'unknown'}")
         self._player_failed = True
         self._play_btn.setEnabled(False)
-        self._status.setText("播放器解码失败，请点“外部播放”或先转码为 H264/AAC MP4。")
+        self._status.setText('播放器解码失败，请点\u201c外部播放\u201d或先转码为 H264/AAC MP4。')
 
     def _open_in_system_player(self) -> None:
         if not self._video_path:
@@ -179,10 +245,15 @@ class VideoWorkbench(QWidget):
     def _mark_start(self) -> None:
         self._mark_in = self._player.position() / 1000
         self._update_mark_label()
+        # Clear timeline drag selection to reflect button-based marks
+        if self._mark_out is not None and self._mark_in < self._mark_out:
+            self._timeline.set_selection(self._mark_in, self._mark_out)
 
     def _mark_end(self) -> None:
         self._mark_out = self._player.position() / 1000
         self._update_mark_label()
+        if self._mark_in is not None and self._mark_in < self._mark_out:
+            self._timeline.set_selection(self._mark_in, self._mark_out)
 
     def _update_mark_label(self) -> None:
         start = _fmt(self._mark_in) if self._mark_in is not None else "--"
@@ -194,7 +265,7 @@ class VideoWorkbench(QWidget):
             QMessageBox.warning(self, "提示", "请先导入视频")
             return
         if self._mark_in is None or self._mark_out is None:
-            QMessageBox.warning(self, "提示", "请先标记开始(I)和结束(O)点")
+            QMessageBox.warning(self, "提示", "请先标记开始(I)和结束(O)点，或在时间轴上拖拽选区")
             return
         if self._mark_in >= self._mark_out:
             QMessageBox.warning(self, "提示", "结束时间必须大于开始时间")
@@ -225,7 +296,7 @@ class VideoWorkbench(QWidget):
             semantic_summary=summary.strip(),
         )
         if not ok:
-            QMessageBox.warning(self, "提示", "切片已保存到本地数据库，但向量化失败，请检查日志。")
+            QMessageBox.warning(self, "提示", "切片已保存到本地数据库，但存储失败，请检查日志。")
 
         self._segments.append(
             {
@@ -253,6 +324,91 @@ class VideoWorkbench(QWidget):
         self._mark_in = None
         self._mark_out = None
         self._update_mark_label()
+        self._timeline.clear_selection()
+
+        # Refresh clips on timeline
+        self._load_existing_clips()
+
+        # Show anchor link dialog
+        self._show_anchor_link_dialog(clip_id)
+
+    def _show_anchor_link_dialog(self, clip_id: str) -> None:
+        """Pop up a dialog to link the new clip to document anchors."""
+        anchors = _load_all_anchors()
+        if not anchors:
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"链接文档 — 切片 {clip_id[:8]}...")
+        dlg.resize(700, 450)
+        layout = QVBoxLayout(dlg)
+
+        # Search filter
+        filter_edit = QLineEdit(dlg)
+        filter_edit.setPlaceholderText("搜索 anchor（标题/内容/文件名）...")
+        layout.addWidget(filter_edit)
+
+        # Anchor list
+        list_widget = QListWidget(dlg)
+        list_widget.setSelectionMode(QListWidget.MultiSelection)
+        items_data: List[dict] = []
+
+        for anchor in anchors:
+            heading = anchor.get("heading_path", "")
+            source = anchor.get("source_file", "")
+            content_preview = (anchor.get("display_content") or anchor.get("content", ""))[:80]
+            anchor_id = anchor.get("anchor_id", "")
+            label = f"[{source}] {heading} — {content_preview}" if heading else f"[{source}] {content_preview}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, anchor)
+            list_widget.addItem(item)
+            items_data.append(anchor)
+
+        layout.addWidget(list_widget)
+
+        # Filter logic
+        def _apply_filter(text: str) -> None:
+            needle = text.strip().lower()
+            for i in range(list_widget.count()):
+                item = list_widget.item(i)
+                data = item.data(Qt.UserRole)
+                if not isinstance(data, dict):
+                    item.setHidden(False)
+                    continue
+                if not needle:
+                    item.setHidden(False)
+                    continue
+                haystack = " ".join(str(v) for v in data.values()).lower()
+                item.setHidden(needle not in haystack)
+
+        filter_edit.textChanged.connect(_apply_filter)
+
+        # Buttons
+        btn_layout = QVBoxLayout()
+        link_btn = QPushButton("链接选中", dlg)
+        skip_btn = QPushButton("稍后链接", dlg)
+        btn_layout.addWidget(link_btn)
+        btn_layout.addWidget(skip_btn)
+        layout.addLayout(btn_layout)
+
+        linked_ids: List[str] = []
+
+        def _on_link() -> None:
+            for item in list_widget.selectedItems():
+                data = item.data(Qt.UserRole)
+                if isinstance(data, dict):
+                    anchor_id = str(data.get("anchor_id", ""))
+                    if anchor_id:
+                        SQLiteStore().insert_cross_modal(clip_id, anchor_id)
+                        linked_ids.append(anchor_id)
+            dlg.accept()
+
+        link_btn.clicked.connect(_on_link)
+        skip_btn.clicked.connect(dlg.reject)
+        dlg.exec_()
+
+        if linked_ids:
+            self._status.setText(f"已链接 {len(linked_ids)} 个 anchor 到切片 {clip_id[:8]}")
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
@@ -270,14 +426,24 @@ class VideoWorkbench(QWidget):
 
 class _TimelineWidget(QWidget):
     position_clicked = pyqtSignal(float)
+    selection_changed = pyqtSignal(float, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._duration = 0.0
         self._playhead = 0.0
         self._segments: List[dict] = []
+        self._clips: List[dict] = []
         self.setMinimumHeight(70)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMouseTracking(True)
+
+        # Drag selection state
+        self._selecting = False
+        self._drag_start_x: int = 0
+        self._drag_end_x: int = 0
+        self._sel_start_sec: Optional[float] = None
+        self._sel_end_sec: Optional[float] = None
 
     def set_duration(self, duration: float) -> None:
         self._duration = max(duration, 1.0)
@@ -292,10 +458,35 @@ class _TimelineWidget(QWidget):
         self._segments.append(seg)
         self.update()
 
+    def set_clips(self, clips: List[dict]) -> None:
+        """Set existing clips to display on the timeline."""
+        self._clips = list(clips)
+        self.update()
+
+    def set_selection(self, start_sec: float, end_sec: float) -> None:
+        """Programmatically set selection (from Mark In/Out buttons)."""
+        self._sel_start_sec = start_sec
+        self._sel_end_sec = end_sec
+        self._drag_start_x = self._sec_to_x(start_sec)
+        self._drag_end_x = self._sec_to_x(end_sec)
+        self.update()
+
+    def clear_selection(self) -> None:
+        """Clear the selection region."""
+        self._sel_start_sec = None
+        self._sel_end_sec = None
+        self._selecting = False
+        self.update()
+
     def _sec_to_x(self, sec: float) -> int:
         if self._duration <= 0:
             return 0
         return int(sec / self._duration * self.width())
+
+    def _x_to_sec(self, x: int) -> float:
+        if self._duration <= 0 or self.width() <= 0:
+            return 0.0
+        return x / self.width() * self._duration
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -303,8 +494,10 @@ class _TimelineWidget(QWidget):
         width = self.width()
         height = self.height()
 
+        # Background
         painter.fillRect(0, 0, width, height, QColor("#1e1e2e"))
 
+        # ASR segments (blue)
         for seg in self._segments:
             x1 = self._sec_to_x(seg["start"])
             x2 = self._sec_to_x(seg["end"])
@@ -313,14 +506,67 @@ class _TimelineWidget(QWidget):
             color = QColor(100, 160, 255, alpha)
             painter.fillRect(x1, 10, max(x2 - x1, 2), height - 20, color)
 
+        # Existing clips (green)
+        for clip in self._clips:
+            start = clip.get("start_sec", clip.get("start", 0)) or 0
+            end = clip.get("end_sec", clip.get("end", 0)) or 0
+            x1 = self._sec_to_x(float(start))
+            x2 = self._sec_to_x(float(end))
+            clip_color = QColor(80, 200, 120, 100)
+            painter.fillRect(x1, 4, max(x2 - x1, 2), height - 8, clip_color)
+            # Clip border
+            painter.setPen(QPen(QColor(80, 200, 120, 180), 1))
+            painter.drawRect(x1, 4, max(x2 - x1, 2), height - 8)
+
+        # Drag selection region (blue transparent)
+        if self._sel_start_sec is not None and self._sel_end_sec is not None:
+            sx1 = self._sec_to_x(self._sel_start_sec)
+            sx2 = self._sec_to_x(self._sel_end_sec)
+            sel_color = QColor(70, 130, 255, 90)
+            painter.fillRect(sx1, 2, max(sx2 - sx1, 2), height - 4, sel_color)
+            painter.setPen(QPen(QColor(70, 130, 255, 200), 2))
+            painter.drawRect(sx1, 2, max(sx2 - sx1, 2), height - 4)
+
+        # Playhead (red line)
         playhead_x = self._sec_to_x(self._playhead)
         painter.setPen(QPen(QColor("#ff5555"), 2))
         painter.drawLine(playhead_x, 0, playhead_x, height)
 
     def mousePressEvent(self, event) -> None:
-        if self._duration > 0 and self.width() > 0:
-            sec = event.x() / self.width() * self._duration
-            self.position_clicked.emit(sec)
+        if event.button() == Qt.LeftButton and self._duration > 0:
+            self._selecting = True
+            self._drag_start_x = event.x()
+            self._drag_end_x = event.x()
+            self._sel_start_sec = self._x_to_sec(event.x())
+            self._sel_end_sec = self._x_to_sec(event.x())
+            self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._selecting:
+            self._drag_end_x = event.x()
+            start_sec = self._x_to_sec(min(self._drag_start_x, self._drag_end_x))
+            end_sec = self._x_to_sec(max(self._drag_start_x, self._drag_end_x))
+            self._sel_start_sec = start_sec
+            self._sel_end_sec = end_sec
+            self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._selecting:
+            self._selecting = False
+            self._drag_end_x = event.x()
+            start_sec = self._x_to_sec(min(self._drag_start_x, self._drag_end_x))
+            end_sec = self._x_to_sec(max(self._drag_start_x, self._drag_end_x))
+
+            # If drag is very small (< 5px), treat as a click to seek
+            if abs(self._drag_end_x - self._drag_start_x) < 5:
+                self._sel_start_sec = None
+                self._sel_end_sec = None
+                self.position_clicked.emit(start_sec)
+            else:
+                self._sel_start_sec = start_sec
+                self._sel_end_sec = end_sec
+                self.selection_changed.emit(start_sec, end_sec)
+            self.update()
 
 
 def _fmt(sec: Optional[float]) -> str:
@@ -346,3 +592,40 @@ def _probe_duration_seconds(video_path: str) -> float:
         return max(float(out), 0.0) if out else 0.0
     except Exception:
         return 0.0
+
+
+def _load_all_anchors() -> List[dict]:
+    """Load all document anchors from .chunks.json files."""
+    import json
+
+    from app.utils import config as cfg
+
+    exports_root = cfg.abs_path(cfg.get("exports.path", "data/exports"))
+    anchors: List[dict] = []
+    if not exports_root.exists():
+        return anchors
+
+    for json_path in sorted(exports_root.rglob("*.chunks.json")):
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        source_file = payload.get("source_file") or json_path.name
+        for chunk in payload.get("chunks", []):
+            if not isinstance(chunk, dict):
+                continue
+            anchor_id = str(chunk.get("anchor_id") or chunk.get("chunk_id") or "").strip()
+            if not anchor_id:
+                continue
+            anchors.append(
+                {
+                    "source_file": str(source_file),
+                    "anchor_id": anchor_id,
+                    "page": chunk.get("page", ""),
+                    "heading_path": str(chunk.get("heading_path", "")),
+                    "content": str(chunk.get("content", "")),
+                    "display_content": str(chunk.get("display_content") or chunk.get("content", "")),
+                }
+            )
+    return anchors

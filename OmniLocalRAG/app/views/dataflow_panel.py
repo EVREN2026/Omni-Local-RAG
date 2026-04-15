@@ -24,8 +24,7 @@ from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QFileDialog,
-    QGroupBox,
-    QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -37,13 +36,13 @@ from PyQt5.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
-    QVBoxLayout,
     QWidget,
     QCheckBox,
 )
 
 from app.utils import config as cfg
 from app.utils.logger import logger
+from app.utils.ui_loader import load_ui, require_child
 
 
 # ---------------------------------------------------------------------------
@@ -138,97 +137,47 @@ class DataflowPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        load_ui(self, "dataflow_panel.ui")
 
-        # Top bar — API optimize + progress
-        top_bar = QHBoxLayout()
-        top_bar.addWidget(QLabel("数据流管理"))
+        # Top bar
+        self._api_optimize_btn = require_child(self, QPushButton, "apiOptimizeButton", "DataflowPanel UI")
+        self._auto_sync_chk = require_child(self, QCheckBox, "autoSyncCheckBox", "DataflowPanel UI")
+        self._progress_bar = require_child(self, QProgressBar, "progressBar", "DataflowPanel UI")
+        self._log_label = require_child(self, QLabel, "logLabel", "DataflowPanel UI")
 
-        self._api_optimize_btn = QPushButton("AI 优化选中 JSON")
+        # Left column — L1 Markdown
+        self._md_list = require_child(self, QListWidget, "markdownList", "DataflowPanel UI")
+        self._refresh_btn = require_child(self, QPushButton, "refreshFilesButton", "DataflowPanel UI")
+        self._open_md_btn = require_child(self, QPushButton, "openMarkdownButton", "DataflowPanel UI")
+        self._md_to_json_btn = require_child(self, QPushButton, "mdToJsonButton", "DataflowPanel UI")
+
+        # Middle column — L2 JSON
+        self._json_path_edit = require_child(self, QLineEdit, "jsonPathEdit", "DataflowPanel UI")
+        self._browse_json_btn = require_child(self, QPushButton, "browseJsonButton", "DataflowPanel UI")
+        self._chunk_table = require_child(self, QTableWidget, "chunkTable", "DataflowPanel UI")
+        self._chunk_editor = require_child(self, QTextEdit, "chunkEditor", "DataflowPanel UI")
+        self._save_chunk_btn = require_child(self, QPushButton, "saveChunkButton", "DataflowPanel UI")
+        self._reload_json_btn = require_child(self, QPushButton, "reloadJsonButton", "DataflowPanel UI")
+        self._json_to_md_btn = require_child(self, QPushButton, "jsonToMdButton", "DataflowPanel UI")
+
+        # Right column — L3 Database
+        self._db_stats_label = require_child(self, QLabel, "dbStatsLabel", "DataflowPanel UI")
+        self._sync_status_label = require_child(self, QLabel, "syncStatusLabel", "DataflowPanel UI")
+        self._check_diff_btn = require_child(self, QPushButton, "checkDiffButton", "DataflowPanel UI")
+        self._sync_btn = require_child(self, QPushButton, "syncButton", "DataflowPanel UI")
+        self._sync_progress = require_child(self, QProgressBar, "syncProgressBar", "DataflowPanel UI")
+
+        # Splitter
+        self._splitter = require_child(self, QSplitter, "mainSplitter", "DataflowPanel UI")
+
+        # Apply dynamic properties that cannot be set in .ui
         self._api_optimize_btn.setStyleSheet("font-weight: bold; background-color: #2a6fdb; color: white;")
-        self._api_optimize_btn.clicked.connect(self._run_api_optimize)
-        top_bar.addWidget(self._api_optimize_btn)
-
-        self._auto_sync_chk = QCheckBox("优化后自动同步到 DB")
-        self._auto_sync_chk.setChecked(False)
-        top_bar.addWidget(self._auto_sync_chk)
-
-        top_bar.addStretch()
-        root.addLayout(top_bar)
-
-        # Progress bar (hidden by default)
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setVisible(False)
-        self._progress_bar.setRange(0, 100)
-        root.addWidget(self._progress_bar)
-
-        # Log line
-        self._log_label = QLabel()
-        self._log_label.setStyleSheet("color: #888; font-size: 11px;")
-        root.addWidget(self._log_label)
-
-        # Three-column splitter
-        splitter = QSplitter(Qt.Horizontal)
-
-        # === Left: L1 Markdown files ===
-        left = self._build_left_column()
-        splitter.addWidget(left)
-
-        # === Middle: L2 JSON chunks ===
-        mid = self._build_mid_column()
-        splitter.addWidget(mid)
-
-        # === Right: L3 Database ===
-        right = self._build_right_column()
-        splitter.addWidget(right)
-
-        splitter.setSizes([260, 560, 220])
-        root.addWidget(splitter, 1)
-
-    def _build_left_column(self) -> QWidget:
-        w = QGroupBox("L1  Markdown（人工可读）")
-        v = QVBoxLayout(w)
-
-        self._md_list = QListWidget()
-        self._md_list.setAlternatingRowColors(True)
-        self._md_list.currentItemChanged.connect(self._on_md_selected)
-        v.addWidget(self._md_list)
-
-        btn_row = QHBoxLayout()
-        self._refresh_btn = QPushButton("刷新列表")
-        self._refresh_btn.clicked.connect(self._refresh_file_list)
-        self._open_md_btn = QPushButton("打开编辑")
-        self._open_md_btn.clicked.connect(self._open_md_in_editor)
-        btn_row.addWidget(self._refresh_btn)
-        btn_row.addWidget(self._open_md_btn)
-        v.addLayout(btn_row)
-
-        self._md_to_json_btn = QPushButton("转换 → JSON")
         self._md_to_json_btn.setStyleSheet("background-color: #3a7d44; color: white;")
-        self._md_to_json_btn.clicked.connect(self._convert_md_to_json)
-        v.addWidget(self._md_to_json_btn)
+        self._sync_btn.setStyleSheet("font-weight: bold; background-color: #b85c00; color: white;")
+        self._log_label.setStyleSheet("color: #888; font-size: 11px;")
+        self._sync_status_label.setStyleSheet("color: #888; font-size: 11px;")
 
-        return w
-
-    def _build_mid_column(self) -> QWidget:
-        w = QGroupBox("L2  JSON（API 接口数据）")
-        v = QVBoxLayout(w)
-
-        # File selector
-        file_row = QHBoxLayout()
-        self._json_path_edit = QLineEdit()
-        self._json_path_edit.setPlaceholderText("JSON 文件路径...")
-        self._json_path_edit.setReadOnly(True)
-        self._browse_json_btn = QPushButton("浏览")
-        self._browse_json_btn.clicked.connect(self._browse_json)
-        file_row.addWidget(self._json_path_edit)
-        file_row.addWidget(self._browse_json_btn)
-        v.addLayout(file_row)
-
-        # Chunk table
-        self._chunk_table = QTableWidget()
+        self._md_list.setAlternatingRowColors(True)
         self._chunk_table.setColumnCount(5)
         self._chunk_table.setHorizontalHeaderLabels(["#", "Heading path", "Block", "is_manual", "内容预览"])
         self._chunk_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -238,67 +187,26 @@ class DataflowPanel(QWidget):
         self._chunk_table.setColumnWidth(1, 160)
         self._chunk_table.setColumnWidth(2, 60)
         self._chunk_table.setColumnWidth(3, 70)
+
+        self._progress_bar.setRange(0, 100)
+        self._splitter.setSizes([260, 560, 220])
+
+        # Connect signals
+        self._api_optimize_btn.clicked.connect(self._run_api_optimize)
+        self._md_list.currentItemChanged.connect(self._on_md_selected)
+        self._refresh_btn.clicked.connect(self._refresh_file_list)
+        self._open_md_btn.clicked.connect(self._open_md_in_editor)
+        self._md_to_json_btn.clicked.connect(self._convert_md_to_json)
+        self._browse_json_btn.clicked.connect(self._browse_json)
         self._chunk_table.cellDoubleClicked.connect(self._on_chunk_double_clicked)
-        v.addWidget(self._chunk_table, 1)
-
-        # Chunk editor
-        edit_group = QGroupBox("内联编辑（双击行打开）")
-        edit_v = QVBoxLayout(edit_group)
-        self._chunk_editor = QTextEdit()
-        self._chunk_editor.setPlaceholderText("双击 chunk 行进行编辑...")
-        self._chunk_editor.setMaximumHeight(120)
-        edit_v.addWidget(self._chunk_editor)
-        save_edit_row = QHBoxLayout()
-        self._save_chunk_btn = QPushButton("保存修改")
         self._save_chunk_btn.clicked.connect(self._save_chunk_edit)
-        save_edit_row.addStretch()
-        save_edit_row.addWidget(self._save_chunk_btn)
-        edit_v.addLayout(save_edit_row)
-        v.addWidget(edit_group)
-
-        # Action buttons
-        btn_row = QHBoxLayout()
-        self._reload_json_btn = QPushButton("重新加载")
         self._reload_json_btn.clicked.connect(self._reload_current_json)
-        self._json_to_md_btn = QPushButton("转换 → MD")
         self._json_to_md_btn.clicked.connect(self._convert_json_to_md)
-        btn_row.addWidget(self._reload_json_btn)
-        btn_row.addWidget(self._json_to_md_btn)
-        v.addLayout(btn_row)
-
-        return w
-
-    def _build_right_column(self) -> QWidget:
-        w = QGroupBox("L3  数据库（检索引擎）")
-        v = QVBoxLayout(w)
-
-        self._db_stats_label = QLabel("向量数量：—\n上次同步：—")
-        self._db_stats_label.setWordWrap(True)
-        v.addWidget(self._db_stats_label)
-
-        self._sync_status_label = QLabel("")
-        self._sync_status_label.setWordWrap(True)
-        self._sync_status_label.setStyleSheet("color: #888; font-size: 11px;")
-        v.addWidget(self._sync_status_label)
-
-        self._check_diff_btn = QPushButton("检查变更")
         self._check_diff_btn.clicked.connect(self._check_diff)
-        v.addWidget(self._check_diff_btn)
-
-        self._sync_btn = QPushButton("同步到 DB")
-        self._sync_btn.setStyleSheet("font-weight: bold; background-color: #b85c00; color: white;")
         self._sync_btn.clicked.connect(self._sync_to_db)
-        v.addWidget(self._sync_btn)
-
-        self._sync_progress = QProgressBar()
-        self._sync_progress.setVisible(False)
-        v.addWidget(self._sync_progress)
-
-        v.addStretch()
 
         # DB stats refresh
         self._refresh_db_stats()
-        return w
 
     # ------------------------------------------------------------------
     # Left column — MD file list

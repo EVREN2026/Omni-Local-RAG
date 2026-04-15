@@ -5,9 +5,8 @@ Launch order:
 1. Setup logger + faulthandler
 2. Run startup dependency checks
 3. Initialize SQLite schema
-4. Connect VectorStore  (non-fatal on failure)
-5. Load BGE-M3          (non-fatal on failure)
-6. Build controllers + views
+4. Connect ChromaStore  (non-fatal on failure)
+5. Build controllers + views
 7. Register global hotkey
 8. Start MemoryWatcher idle timer
 9. Show tray icon → app.exec_()
@@ -47,11 +46,10 @@ if running_in_local_venv and os.path.exists(venv_path):
 
 # On Windows, importing PyQt5 before torch can make torch fail later while
 # loading native DLLs (c10.dll / WinError 1114). Preloading torch here only
-# initializes its runtime; the BGE-M3 model still loads lazily on first use.
+# initializes its runtime; the marker PDF parser still uses it lazily.
 try:
     import torch  # type: ignore  # noqa: F401
 except Exception:
-    # EmbedManager will surface the actionable error when embeddings are needed.
     pass
 
 # faulthandler prints a native backtrace on segfault / DLL abort
@@ -109,20 +107,20 @@ def main() -> int:
         logger.error("SQLiteStore init failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
-    # 3. VectorStore  (non-fatal)
+    # 3. ChromaStore  (non-fatal)
     # ------------------------------------------------------------------ #
-    logger.info("Step 3/7 — VectorStore connect")
+    logger.info("Step 3/7 — ChromaStore connect")
     try:
         from app.models.chroma_store import ChromaStore
         if not ChromaStore().connect():
-            logger.warning("VectorStore unavailable — search disabled until restart")
+            logger.warning("ChromaStore unavailable — search disabled until restart")
     except Exception:
-        logger.error("VectorStore connect raised exception", exc_info=True)
+        logger.error("ChromaStore connect raised exception", exc_info=True)
 
     # ------------------------------------------------------------------ #
-    # 4. BGE-M3 embedding model  (lazy)
+    # 4. LLM (lazy)
     # ------------------------------------------------------------------ #
-    logger.info("Step 4/7 — BGE-M3 embedding model will load on first use")
+    logger.info("Step 4/7 — LLM will load on first use")
 
     # ------------------------------------------------------------------ #
     # 5. Controllers
@@ -173,7 +171,19 @@ def main() -> int:
         logger.warning("System tray not available on this desktop — tray icon hidden")
 
     tray.show()
- 
+
+    # ── Ensure llama-server is stopped on exit ──
+    def _cleanup():
+        try:
+            from app.models.llm_manager import LLMManager
+            LLMManager().unload(reason="app_exit")
+        except Exception:
+            pass
+
+    import atexit
+    atexit.register(_cleanup)
+    app.aboutToQuit.connect(_cleanup)
+
     elapsed_ms = (time.perf_counter() - t_start) * 1000
     logger.info(f"Application ready in {elapsed_ms:.0f} ms — entering event loop")
 

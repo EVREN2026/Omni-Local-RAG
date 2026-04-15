@@ -8,15 +8,16 @@ from typing import Dict, List, Optional
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from app.models.chroma_store import ChromaStore
-from app.models.embed_manager import EmbedManager
+from app.models.gemma_router import GemmaRouter
 from app.models.llm_manager import LLMManager
 from app.models.qa_memory import QAMemoryRecorder
 from app.models.sqlite_store import SQLiteStore
 from app.utils import config as cfg
+from app.utils.category_keywords import heuristic_category as _heuristic_category
 from app.utils.logger import RAG_TRACE, logger
 
 _RAG_PROMPT_TEMPLATE = """\
-以下是从知识库中检索到的相关内容（共 {chunk_count} 条，编号 [1]-[{chunk_count}]）：
+{history_section}以下是从知识库中检索到的相关内容（共 {chunk_count} 条，编号 [1]-[{chunk_count}]）：
 
 {context}
 
@@ -30,6 +31,7 @@ _RAG_PROMPT_TEMPLATE = """\
 6. 如果检索内容中包含图片引用（如 ![](_page_X_Picture_Y.jpeg)），请在回答中原样保留该图片引用，不要省略。
 7. 回答文案必须忠实于检索内容原文，不得随意改写或概括原始文案的具体数值、路径、参数名称。
 8. 用中文回答。
+9. 如果问题包含代词（它、这个、那个等），请结合对话历史理解指代。
 
 问题：{query}
 
@@ -37,16 +39,6 @@ _RAG_PROMPT_TEMPLATE = """\
 
 _DIVIDER = "=" * 72
 _SECTION = "-" * 72
-_JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
-
-_TECH_KEYWORDS = {
-    "api", "sdk", "python", "java", "cpp", "安装", "部署", "代码", "参数", "模型", "llm", "cuda",
-    "故障", "调试", "配置", "接口", "版本", "依赖", "command", "linux", "windows",
-}
-_BUSINESS_KEYWORDS = {
-    "sop", "流程", "制度", "审批", "业务", "运营", "客服", "销售", "采购", "培训", "规范", "手册",
-}
-_FOLLOWUP_MARKERS = {"它", "这个", "那个", "其", "这", "那", "上面", "前面", "刚才", "上一条"}
 
 
 class _ConversationMemory:
@@ -98,6 +90,10 @@ def _result_block_type(result: dict) -> str:
 
 
 def _result_heading_path(result: dict) -> str:
+    # First check top-level heading_path (new schema), then pdf_payload
+    hp = result.get("heading_path")
+    if hp and str(hp).strip():
+        return str(hp).strip()
     payload = _payload(result)
     return str(payload.get("heading_path") or "").strip()
 
@@ -116,128 +112,7 @@ def _result_source_file(result: dict) -> str:
     return str(source).strip().lower()
 
 
-def _contains_any(text: str, keywords: set) -> bool:
-    content = (text or "").lower()
-    return any(k in content for k in keywords)
-
-
-def _heuristic_category(text: str) -> str:
-    if _contains_any(text, _TECH_KEYWORDS):
-        return "tech_manual"
-    if _contains_any(text, _BUSINESS_KEYWORDS):
-        return "business_sop"
-    return "general"
-
-
-def _heuristic_condense(query: str, memory: List[Dict[str, str]]) -> str:
-    q = (query or "").strip()
-    if not q:
-        return q
-    if not memory:
-        return q
-    if any(marker in q for marker in _FOLLOWUP_MARKERS):
-        last = memory[-1]
-        anchor = last.get("standalone_query") or last.get("query") or ""
-        anchor = anchor.strip()
-        if anchor:
-            return f"基于“{anchor}”：{q}"
-    return q
-
-
-def _parse_router_json(raw: str) -> Optional[dict]:
-    if not raw:
-        return None
-    candidate = raw.strip()
-    match = _JSON_BLOCK_RE.search(candidate)
-    if match:
-        candidate = match.group(0)
-    try:
-        parsed = json.loads(candidate)
-    except Exception:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    category = str(parsed.get("category") or "").strip()
-    standalone = str(parsed.get("standalone_query") or "").strip()
-    if not category or not standalone:
-        return None
-    if category not in {"tech_manual", "business_sop", "general"}:
-        category = "general"
-    return {"category": category, "standalone_query": standalone}
-
-
-def _route_query(query: str, memory: List[Dict[str, str]], llm: LLMManager) -> dict:
-    condensed_default = _heuristic_condense(query, memory)
-    fallback = {
-        "category": _heuristic_category(condensed_default),
-        "standalone_query": condensed_default,
-        "router_source": "heuristic",
-    }
-
-    if not cfg.get("router.enabled", True):
-        return fallback
-
-    if not cfg.get("llm.enabled", True):
-        return fallback
-
-    try:
-        if not llm.is_loaded and not llm.load():
-            return fallback
-    except Exception:
-        return fallback
-
-    history_lines = []
-    for idx, turn in enumerate(memory[-5:], 1):
-        history_lines.append(
-            f"{idx}. Q: {turn.get('query', '')}\n"
-            f"   A: {turn.get('answer', '')[:160]}\n"
-            f"   C: {turn.get('category', 'general')}"
-        )
-    history_text = "\n".join(history_lines) if history_lines else "（无历史）"
-
-    prompt = (
-        "你是 OmniLocalRAG 的意图路由器。"
-        "请基于对话历史和当前问题输出严格 JSON，不要输出解释。\n"
-        "允许的 category 只有：tech_manual, business_sop, general。\n"
-        "输出格式：{\"category\":\"...\",\"standalone_query\":\"...\"}\n"
-        "规则：\n"
-        "- standalone_query 必须是独立可检索问题。\n"
-        "- 如果问题偏安装、接口、技术排障，category=tech_manual。\n"
-        "- 如果问题偏流程制度、业务SOP，category=business_sop。\n"
-        "- 不确定时 category=general。\n\n"
-        f"对话历史：\n{history_text}\n\n"
-        f"当前问题：{query}\n"
-    )
-    try:
-        raw = "".join(llm.generate(prompt, stream=False))
-        parsed = _parse_router_json(raw)
-        if parsed:
-            parsed["router_source"] = "llm"
-            return parsed
-    except Exception as exc:
-        logger.warning(f"Router LLM failed, fallback to heuristic: {exc}")
-
-    return fallback
-
-
-def _infer_result_category(result: dict) -> str:
-    source_file = _result_source_file(result)
-    heading = _result_heading_path(result)
-    content = _result_content(result)[:300]
-    blob = f"{source_file} {heading} {content}"
-    return _heuristic_category(blob)
-
-
-def _filter_results_by_category(results: List[dict], category: str, top_k: int) -> List[dict]:
-    if category not in {"tech_manual", "business_sop"}:
-        return results[:top_k]
-    filtered = [row for row in results if _infer_result_category(row) == category]
-    if len(filtered) >= max(1, min(top_k, 2)):
-        return filtered[:top_k]
-    return results[:top_k]
-
-
-def _build_prompt(query: str, results: list, category: str) -> str:
+def _build_prompt(query: str, results: list, category: str, conversation_history: List[Dict[str, str]] = None) -> str:
     context_parts = []
     for i, result in enumerate(results, 1):
         source = result.get("anchor_id") or result.get("id", "")
@@ -263,10 +138,27 @@ def _build_prompt(query: str, results: list, category: str) -> str:
         context_parts.append(f"[{i}] " + "\n".join(parts) + f"\n    （来源 chunk: {source}）")
 
     chunk_count = len(results)
+
+    # Build conversation history section
+    history_section = ""
+    if conversation_history:
+        history_lines = []
+        for idx, turn in enumerate(conversation_history[-5:], 1):
+            q = turn.get("query", "")
+            a = turn.get("answer", "")[:200]
+            history_lines.append(f"{idx}. Q: {q}\n   A: {a}")
+        turn_count = len(history_lines)
+        history_section = (
+            f"以下是最近 {turn_count} 轮对话历史：\n"
+            + "\n".join(history_lines)
+            + "\n\n---\n\n"
+        )
+
     return _RAG_PROMPT_TEMPLATE.format(
         chunk_count=chunk_count,
         context="\n\n".join(context_parts),
         query=query,
+        history_section=history_section,
     )
 
 
@@ -385,7 +277,11 @@ def _log_rag_trace(
 
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     retrieval_total = timings.get("retrieval_total_ms", 0.0)
-    mode = timings.get("retrieval_mode", "dense")
+    route_ms = timings.get("route_ms", 0.0)
+    locate_ms = timings.get("locate_ms", 0.0)
+    validate_ms = timings.get("validate_ms", 0.0)
+    attempts = timings.get("attempts", 1)
+    validated = timings.get("validated", False)
     hits = timings.get("hits", len(results))
     llm_load_ms = timings.get("llm_load_ms", 0.0)
     generation_ms = timings.get("generation_ms", 0.0)
@@ -402,8 +298,9 @@ def _log_rag_trace(
         f"standalone_query: {standalone_query}",
         f"route_category: {route_category}",
         f"query_source: {query_source}",
+        f"attempts: {attempts}  validated: {validated}",
         "",
-        f"§ 2. 检索命中内容  [mode={mode} hits={hits} 检索耗时 {retrieval_total:.1f}ms]",
+        f"§ 2. 检索命中内容  [route={route_ms:.1f}ms locate={locate_ms:.1f}ms validate={validate_ms:.1f}ms hits={hits} 检索耗时 {retrieval_total:.1f}ms]",
         _SECTION,
     ]
 
@@ -411,15 +308,11 @@ def _log_rag_trace(
         lines.append("  （无命中结果）")
     else:
         for i, r in enumerate(results, 1):
-            final_score = float(r.get("retrieval_score", 0.0))
-            dense_score = float(r.get("dense_score", 0.0))
-            sparse_score = float(r.get("sparse_score", 0.0))
-            block_type = _result_block_type(r)
             heading_path = _result_heading_path(r)
+            block_type = _result_block_type(r)
             content = _result_content(r)
             lines.append(
-                f"[{i}] score={final_score:.3f} dense={dense_score:.3f} "
-                f"sparse={sparse_score:.3f} type={block_type} category={r.get('route_category', route_category)}"
+                f"[{i}] type={block_type} category={r.get('route_category', route_category)}"
             )
             if heading_path:
                 lines.append(f"  路径: {heading_path}")
@@ -464,85 +357,156 @@ class InferenceWorker(QThread):
     def run(self) -> None:
         try:
             overall_t0 = time.perf_counter()
-            embed = EmbedManager()
             chroma = ChromaStore()
+            if not chroma.connect():
+                self.error_occurred.emit("数据库连接失败，请重启应用")
+                self.generation_finished.emit(False)
+                return
             llm = LLMManager()
             memory = _ConversationMemory()
+            router = GemmaRouter()
 
-            top_k = int(cfg.get("retrieval.top_k", 5))
-            candidate_k = max(top_k, int(cfg.get("retrieval.candidate_k", top_k * 3)))
-            embed_was_loaded = embed.is_loaded
             llm_was_loaded = llm.is_loaded
 
-            t_router = time.perf_counter()
-            route = _route_query(self.query, memory.recent(), llm)
-            route_ms = (time.perf_counter() - t_router) * 1000
-            route_category = str(route.get("category") or "general")
-            standalone_query = str(route.get("standalone_query") or self.query).strip() or self.query
-            query_source = "standalone_query" if standalone_query != self.query else "raw_query"
-            router_source = str(route.get("router_source") or "heuristic")
+            # 1. Ensure llama-server is running
+            t_load = time.perf_counter()
+            llm_loaded_now = llm.load()
+            llm_load_ms = (time.perf_counter() - t_load) * 1000
 
-            t0 = time.perf_counter()
-            query_sparse = None
-            if hasattr(embed, "encode_payloads"):
-                [query_payload] = embed.encode_payloads([standalone_query], return_sparse=True)
-                q_vec = list(query_payload.get("dense") or [])
-                query_sparse = query_payload.get("sparse") or None
-            else:
-                [q_vec] = embed.encode([standalone_query])
-            embed_ms = (time.perf_counter() - t0) * 1000
+            if not llm_loaded_now:
+                # Degraded mode: heuristic routing + SQL text search
+                route_category = _heuristic_category(self.query)
+                standalone_query = self.query
+                query_source = "raw_query"
+                router_source = "heuristic_degraded"
 
-            t1 = time.perf_counter()
-            raw_results = chroma.query(
-                q_vec,
-                n_results=candidate_k,
-                query_text=standalone_query,
-                query_sparse=query_sparse,
+                t1 = time.perf_counter()
+                results = chroma.search_text(self.query, limit=int(cfg.get("retrieval.top_k", 5)))
+                retrieval_ms = (time.perf_counter() - t1) * 1000
+
+                for row in results:
+                    row["route_category"] = route_category
+                    row["query_source"] = query_source
+
+                base_timings = {
+                    "stage": "retrieval",
+                    "route_ms": 0.0,
+                    "locate_ms": round(retrieval_ms, 1),
+                    "validate_ms": 0.0,
+                    "retrieval_total_ms": round(retrieval_ms, 1),
+                    "top_k": int(cfg.get("retrieval.top_k", 5)),
+                    "hits": len(results),
+                    "llm_server_ready": False,
+                    "category": route_category,
+                    "router_source": router_source,
+                    "query_source": query_source,
+                    "standalone_query": standalone_query,
+                    "attempts": 1,
+                    "validated": False,
+                    "reasoning_steps": [
+                        f"[路由] 启发式降级: 分类={route_category}",
+                        f"[定位] 文本搜索命中{len(results)}条",
+                        "[验证] LLM不可用，跳过验证",
+                    ],
+                }
+                self.timings_ready.emit(base_timings)
+                self.context_retrieved.emit(
+                    _build_display_results(results, route_category, query_source)
+                )
+
+                if not results:
+                    answer = "（未检索到相关内容，请先导入知识文档）"
+                    self.token_generated.emit(answer)
+                    _record_qa_memory(self.query, results, answer, mode="no_results")
+                    memory.append(self.query, answer, route_category, standalone_query)
+                    _log_rag_trace(
+                        query=self.query,
+                        standalone_query=standalone_query,
+                        route_category=route_category,
+                        query_source=query_source,
+                        results=results,
+                        prompt="(降级模式，无LLM)",
+                        answer=answer,
+                        timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
+                    )
+                    self.generation_finished.emit(True)
+                    return
+
+                answer = _build_retrieval_answer(
+                    results,
+                    f"本地 LLM 加载失败，已降级为文本搜索。\n原因：{llm.last_error or '请检查 llama-server 配置'}",
+                )
+                self.token_generated.emit(answer)
+                _record_qa_memory(self.query, results, answer, mode="llm_load_failed")
+                memory.append(self.query, answer, route_category, standalone_query)
+                _log_rag_trace(
+                    query=self.query,
+                    standalone_query=standalone_query,
+                    route_category=route_category,
+                    query_source=query_source,
+                    results=results,
+                    prompt="(降级模式)",
+                    answer=answer,
+                    timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
+                )
+                self.generation_finished.emit(True)
+                return
+
+            # 2. Multi-round self-verification search
+            t_search = time.perf_counter()
+            search_result = router.search(
+                query=self.query,
+                memory=memory.recent(),
+                chroma=chroma,
             )
-            results = _filter_results_by_category(raw_results, route_category, top_k=top_k)
+            search_ms = (time.perf_counter() - t_search) * 1000
+
+            route_category = search_result["category"]
+            standalone_query = search_result["standalone_query"]
+            query_source = "standalone_query" if standalone_query != self.query else "raw_query"
+            router_source = search_result["router_source"]
+            results = search_result["chunks"]
+            attempts = search_result["attempts"]
+            validated = search_result["validated"]
+            router_timings = search_result.get("timings", {})
+
             for row in results:
-                row["route_category"] = _infer_result_category(row)
+                row["route_category"] = route_category
                 row["query_source"] = query_source
                 row["standalone_query"] = standalone_query
-            vector_ms = (time.perf_counter() - t1) * 1000
-            retrieval_ms = embed_ms + vector_ms
-            retrieval_mode = str(results[0].get("retrieval_mode", "dense")) if results else "dense"
+
+            route_ms = router_timings.get("route_ms", 0.0)
+            locate_ms = router_timings.get("locate_ms", 0.0)
+            validate_ms = router_timings.get("validate_ms", 0.0)
+            reasoning_steps = search_result.get("reasoning_steps", [])
 
             base_timings = {
                 "stage": "retrieval",
-                "embed_ms": round(embed_ms, 1),
-                "vector_ms": round(vector_ms, 1),
-                "router_ms": round(route_ms, 1),
-                "retrieval_total_ms": round(retrieval_ms, 1),
-                "retrieval_mode": retrieval_mode,
-                "top_k": top_k,
+                "route_ms": round(route_ms, 1),
+                "locate_ms": round(locate_ms, 1),
+                "validate_ms": round(validate_ms, 1),
+                "retrieval_total_ms": round(search_ms, 1),
+                "top_k": int(cfg.get("retrieval.top_k", 5)),
                 "hits": len(results),
-                "embed_reused": bool(embed_was_loaded),
                 "llm_server_ready": bool(llm_was_loaded),
                 "category": route_category,
                 "router_source": router_source,
                 "query_source": query_source,
                 "standalone_query": standalone_query,
+                "attempts": attempts,
+                "validated": validated,
+                "reasoning_steps": reasoning_steps,
             }
             self.timings_ready.emit(base_timings)
             self.context_retrieved.emit(
-                _build_display_results(
-                    results,
-                    route_category=route_category,
-                    query_source=query_source,
-                )
+                _build_display_results(results, route_category, query_source)
             )
 
             if not results:
                 answer = "（未检索到相关内容，请先导入知识文档）"
                 self.token_generated.emit(answer)
                 _record_qa_memory(self.query, results, answer, mode="no_results")
-                memory.append(
-                    query=self.query,
-                    answer=answer,
-                    category=route_category,
-                    standalone_query=standalone_query,
-                )
+                memory.append(self.query, answer, route_category, standalone_query)
                 _log_rag_trace(
                     query=self.query,
                     standalone_query=standalone_query,
@@ -551,15 +515,17 @@ class InferenceWorker(QThread):
                     results=results,
                     prompt="(无检索结果，跳过提示词构建)",
                     answer=answer,
-                    timings={**base_timings, "llm_load_ms": 0.0, "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
+                    timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
                 )
                 self.generation_finished.emit(True)
                 return
 
+            # 3. Build prompt with conversation history
             prompt = _build_prompt(
                 query=standalone_query,
                 results=results,
                 category=route_category,
+                conversation_history=memory.recent(),
             )
 
             if not cfg.get("llm.enabled", True):
@@ -569,12 +535,7 @@ class InferenceWorker(QThread):
                 )
                 self.token_generated.emit(answer)
                 _record_qa_memory(self.query, results, answer, mode="retrieval_only")
-                memory.append(
-                    query=self.query,
-                    answer=answer,
-                    category=route_category,
-                    standalone_query=standalone_query,
-                )
+                memory.append(self.query, answer, route_category, standalone_query)
                 _log_rag_trace(
                     query=self.query,
                     standalone_query=standalone_query,
@@ -588,37 +549,7 @@ class InferenceWorker(QThread):
                 self.generation_finished.emit(True)
                 return
 
-            t_load = time.perf_counter()
-            llm_loaded_now = llm.load()
-            llm_load_ms = (time.perf_counter() - t_load) * 1000
-
-            if not llm_loaded_now:
-                detail = llm.last_error or "请检查 models/ 目录与 llama-server 配置"
-                answer = _build_retrieval_answer(
-                    results,
-                    f"本地 LLM 加载失败，已降级为检索结果直出。\n原因：{detail}",
-                )
-                self.token_generated.emit(answer)
-                _record_qa_memory(self.query, results, answer, mode="llm_load_failed")
-                memory.append(
-                    query=self.query,
-                    answer=answer,
-                    category=route_category,
-                    standalone_query=standalone_query,
-                )
-                _log_rag_trace(
-                    query=self.query,
-                    standalone_query=standalone_query,
-                    route_category=route_category,
-                    query_source=query_source,
-                    results=results,
-                    prompt=prompt,
-                    answer=answer,
-                    timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
-                )
-                self.generation_finished.emit(True)
-                return
-
+            # 4. Stream generation
             t2 = time.perf_counter()
             answer_parts: List[str] = []
             llm_generation_error = ""
@@ -667,12 +598,7 @@ class InferenceWorker(QThread):
                     timings=complete_timings,
                 )
                 _record_qa_memory(self.query, results, answer_text, mode="llm")
-                memory.append(
-                    query=self.query,
-                    answer=answer_text,
-                    category=route_category,
-                    standalone_query=standalone_query,
-                )
+                memory.append(self.query, answer_text, route_category, standalone_query)
             self.generation_finished.emit(not self._cancelled)
 
         except MemoryError:

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt5.QtWidgets import QComboBox, QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QTabWidget, QWidget
+from PyQt5.QtWidgets import QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QTabWidget, QWidget
 
 from app.controllers.ingest_controller import IngestController
 from app.controllers.search_controller import SearchController
@@ -35,11 +35,8 @@ class KnowledgeEditor(QMainWindow):
         self._stage_label = require_child(self, QLabel, "stageLabel", "KnowledgeEditor UI")
         self._progress_bar = require_child(self, QProgressBar, "progressBar", "KnowledgeEditor UI")
         self._tabs = require_child(self, QTabWidget, "tabsWidget", "KnowledgeEditor UI")
-        self._clip_combo = require_child(self, QComboBox, "clipCombo", "KnowledgeEditor UI")
-        self._anchor_combo = require_child(self, QComboBox, "anchorCombo", "KnowledgeEditor UI")
         btn_import_file = require_child(self, QPushButton, "importFileButton", "KnowledgeEditor UI")
         btn_import_video = require_child(self, QPushButton, "importVideoButton", "KnowledgeEditor UI")
-        btn_bind = require_child(self, QPushButton, "bindButton", "KnowledgeEditor UI")
 
         self.setWindowTitle("Omni-Local RAG - Knowledge Editor")
         self.resize(1200, 760)
@@ -51,7 +48,6 @@ class KnowledgeEditor(QMainWindow):
 
         btn_import_file.clicked.connect(self._import_pdf)
         btn_import_video.clicked.connect(self._import_video)
-        btn_bind.clicked.connect(self._bind_cross_modal)
 
         from app.views.pdf_workbench import PDFWorkbench
         from app.views.chunk_workbench import ChunkWorkbench
@@ -75,10 +71,6 @@ class KnowledgeEditor(QMainWindow):
         self._tabs.addTab(self._cross_modal_panel, "跨模态绑定")
         self._tabs.addTab(self._api_settings_panel, "API设置")
 
-        self._video_bench.clip_created.connect(self._on_clip_created)
-        self._video_bench.clips_loaded.connect(self._refresh_clip_combo)
-        self._chunk_bench.chunks_available.connect(self._refresh_anchor_combo)
-        self._dataflow_panel.chunks_loaded.connect(self._refresh_anchor_combo)
         self._video_bench.clip_created.connect(lambda _: self._cross_modal_panel.refresh_clips())
         self._video_bench.clips_loaded.connect(lambda _: self._cross_modal_panel.refresh_clips())
         self._chunk_bench.chunks_available.connect(lambda _: self._cross_modal_panel.refresh_anchors())
@@ -128,48 +120,6 @@ class KnowledgeEditor(QMainWindow):
         self._video_bench.load_video(path)
         self._ingest.transcribe_video(path)
         self._tabs.setCurrentWidget(self._video_bench)
-
-    def _bind_cross_modal(self) -> None:
-        clip_id = self._clip_combo.currentData()
-        anchor_id = self._anchor_combo.currentData()
-        if not clip_id or not anchor_id:
-            return
-        from app.models.sqlite_store import SQLiteStore
-
-        mapping_id = SQLiteStore().insert_cross_modal(clip_id, anchor_id)
-        logger.info(f"Cross-modal map created: {mapping_id}")
-        self._cross_modal_panel.refresh_bindings()
-        self._stage_label.setText(f"已绑定 {str(clip_id)[:8]}... -> {str(anchor_id)[:8]}...")
-
-    def _refresh_anchor_combo(self, chunks: list) -> None:
-        self._anchor_combo.clear()
-        for chunk in chunks:
-            if not isinstance(chunk, dict):
-                continue
-            anchor_id = str(chunk.get("anchor_id") or chunk.get("chunk_id") or "").strip()
-            if not anchor_id:
-                continue
-
-            source_file = str(chunk.get("source_file") or "").strip()
-            page = chunk.get("page", "")
-            heading = str(chunk.get("heading_path") or "").replace("\n", " ").strip()
-            content = str(chunk.get("display_content") or chunk.get("content") or "").replace("\n", " ").strip()
-            preview = content[:56] + ("..." if len(content) > 56 else "")
-
-            label_parts = []
-            if source_file:
-                label_parts.append(source_file)
-            label_parts.append(anchor_id)
-            if page not in ("", None):
-                label_parts.append(f"p{page}")
-            if heading:
-                label_parts.append(heading[:36])
-            if preview:
-                label_parts.append(preview)
-
-            self._anchor_combo.addItem(" | ".join(label_parts), anchor_id)
-
-        self._stage_label.setText(f"Anchor 列表已更新: {self._anchor_combo.count()} 个 chunk")
 
     def _on_progress(self, current: int, total: int) -> None:
         if total > 0:
@@ -221,40 +171,3 @@ class KnowledgeEditor(QMainWindow):
     def _on_parse_done(self, parser_name: str, num_blocks: int) -> None:
         del num_blocks
         self._stage_label.setText(f"转换完成 ({parser_name})，已生成 Markdown")
-
-    def _on_clip_created(self, clip: dict) -> None:
-        clip_id = clip.get("id")
-        if not clip_id:
-            return
-        self._add_clip_to_combo(clip)
-        self._stage_label.setText(f"切片已创建: {str(clip_id)[:8]}...")
-
-    def _refresh_clip_combo(self, clips: list) -> None:
-        self._clip_combo.clear()
-        for clip in clips:
-            self._add_clip_to_combo(clip)
-        self._stage_label.setText(f"视频切片列表已更新: {self._clip_combo.count()} 个 clip")
-
-    def _add_clip_to_combo(self, clip: dict) -> None:
-        clip_id = clip.get("id")
-        if not clip_id:
-            return
-        for index in range(self._clip_combo.count()):
-            if self._clip_combo.itemData(index) == clip_id:
-                return
-        start = clip.get("start", clip.get("start_sec", 0)) or 0
-        end = clip.get("end", clip.get("end_sec", 0)) or 0
-        video_file = str(clip.get("video_file") or "").strip()
-        summary = str(clip.get("summary") or clip.get("semantic_summary") or "").replace("\n", " ").strip()
-
-        label_parts = []
-        if video_file:
-            label_parts.append(video_file)
-        try:
-            label_parts.append(f"{float(start):.1f}s-{float(end):.1f}s")
-        except (TypeError, ValueError):
-            label_parts.append(f"{start}s-{end}s")
-        if summary:
-            label_parts.append(summary[:48] + ("..." if len(summary) > 48 else ""))
-        label_parts.append(f"{str(clip_id)[:8]}...")
-        self._clip_combo.addItem(" | ".join(label_parts), clip_id)

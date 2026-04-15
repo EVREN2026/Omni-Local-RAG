@@ -152,7 +152,17 @@
          </property>
          <layout class="QVBoxLayout" name="chunkEditorGroupLayout">
           <item>
-           <widget class="QTextEdit" name="chunkEditor"/>
+           <widget class="QTextEdit" name="chunkEditor">
+            <property name="placeholderText">
+             <string>双击 chunk 行进行编辑...</string>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>16777215</width>
+              <height>120</height>
+             </size>
+            </property>
+           </widget>
           </item>
           <item>
            <layout class="QHBoxLayout" name="saveChunkLayout">
@@ -209,7 +219,8 @@
        <item>
         <widget class="QLabel" name="dbStatsLabel">
          <property name="text">
-          <string>向量数量：—</string>
+          <string>向量数量：—
+上次同步：—</string>
          </property>
          <property name="wordWrap">
           <bool>true</bool>

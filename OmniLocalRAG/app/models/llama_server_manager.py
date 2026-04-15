@@ -385,8 +385,17 @@ class LlamaServerManager:
         self._proc = None
         self._current_model = None
         try:
-            proc.terminate()
-            proc.wait(timeout=_STOP_GRACE)
+            # On Windows, terminate the entire process tree to avoid orphans
+            if _is_windows():
+                subprocess.call(
+                    ["taskkill", "/f", "/t", "/pid", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                proc.wait(timeout=_STOP_GRACE)
+            else:
+                proc.terminate()
+                proc.wait(timeout=_STOP_GRACE)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
@@ -447,8 +456,8 @@ class LlamaServerManager:
         if batch_size > 0:
             cmd += ["--batch-size", str(batch_size)]
 
-        if ubatch > 0:
-            cmd += ["--ubatch-size", str(min(ubatch, batch_size) if batch_size > 0 else ubatch)]
+        if ubatch > 0 and batch_size > 0:
+            cmd += ["--ubatch-size", str(min(ubatch, batch_size))]
 
         if flash_attn:
             cmd += ["--flash-attn", "on"]
@@ -496,12 +505,19 @@ class LlamaServerManager:
 
     @staticmethod
     def _pipe_logs(proc: subprocess.Popen) -> None:
-        """将 llama-server 的 stdout/stderr 转发到应用日志（DEBUG 级别）。"""
+        """将 llama-server 的 stdout/stderr 转发到应用日志。"""
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
                 line = line.rstrip()
-                if line:
+                if not line:
+                    continue
+                # Key progress lines use INFO so they are visible by default;
+                # everything else stays at DEBUG to avoid noise.
+                lower = line.lower()
+                if any(kw in lower for kw in ("load", "model", "server", "listening", "ready", "error", "warn", "fail", "cuda", "gguf", "ctx")):
+                    logger.info(f"[llama-server] {line}")
+                else:
                     logger.debug(f"[llama-server] {line}")
         except Exception:
             pass

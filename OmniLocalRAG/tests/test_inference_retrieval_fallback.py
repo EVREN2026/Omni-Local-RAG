@@ -21,13 +21,6 @@ class DummyQThread:
         pass
 
 
-class FakeEmbedManager:
-    is_loaded = False
-
-    def encode(self, texts):
-        return [[0.1, 0.2]]
-
-
 class FakeChromaStore:
     def query(self, embedding, n_results=5, query_text="", query_sparse=None):
         return [
@@ -58,10 +51,6 @@ def install_import_stubs():
     sys.modules["PyQt5"] = pyqt5
     sys.modules["PyQt5.QtCore"] = qtcore
 
-    embed_module = types.ModuleType("app.models.embed_manager")
-    embed_module.EmbedManager = FakeEmbedManager
-    sys.modules["app.models.embed_manager"] = embed_module
-
     chroma_module = types.ModuleType("app.models.chroma_store")
     chroma_module.ChromaStore = FakeChromaStore
     sys.modules["app.models.chroma_store"] = chroma_module
@@ -76,7 +65,6 @@ class InferenceRetrievalFallbackTest(unittest.TestCase):
         self.stubbed_modules = (
             "PyQt5",
             "PyQt5.QtCore",
-            "app.models.embed_manager",
             "app.models.chroma_store",
             "app.models.llm_manager",
             "app.workers.inference_worker",
