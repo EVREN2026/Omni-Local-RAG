@@ -9,6 +9,8 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 from app.models.chroma_store import ChromaStore
 from app.models.gemma_router import GemmaRouter
+from app.models.knowledge_graph import KnowledgeGraph
+from app.models.graph_traverser import GraphTraverser
 from app.models.llm_manager import LLMManager
 from app.models.qa_memory import QAMemoryRecorder
 from app.models.sqlite_store import SQLiteStore
@@ -362,112 +364,58 @@ class InferenceWorker(QThread):
                 self.error_occurred.emit("数据库连接失败，请重启应用")
                 self.generation_finished.emit(False)
                 return
-            llm = LLMManager()
             memory = _ConversationMemory()
-            router = GemmaRouter()
+            top_k = int(cfg.get("retrieval.top_k", 5))
 
-            llm_was_loaded = llm.is_loaded
-
-            # 1. Ensure llama-server is running
-            t_load = time.perf_counter()
-            llm_loaded_now = llm.load()
-            llm_load_ms = (time.perf_counter() - t_load) * 1000
-
-            if not llm_loaded_now:
-                # Degraded mode: heuristic routing + SQL text search
+            # ── Phase 1: Retrieval (zero LLM) ──────────────────────
+            # Use graph traversal if available, otherwise fallback to text search
+            kg = KnowledgeGraph()
+            if kg.is_loaded():
+                # Graph-based retrieval (~10-50ms, zero LLM)
+                t_search = time.perf_counter()
+                traverser = GraphTraverser()
+                search_result = traverser.search(
+                    query=self.query,
+                    memory=memory.recent(),
+                    top_k=top_k,
+                )
+                search_ms = (time.perf_counter() - t_search) * 1000
+            else:
+                # Fallback: heuristic routing + SQL text search (no LLM)
+                t_search = time.perf_counter()
                 route_category = _heuristic_category(self.query)
                 standalone_query = self.query
-                query_source = "raw_query"
-                router_source = "heuristic_degraded"
-
-                t1 = time.perf_counter()
-                results = chroma.search_text(self.query, limit=int(cfg.get("retrieval.top_k", 5)))
-                retrieval_ms = (time.perf_counter() - t1) * 1000
+                results = chroma.search_text(self.query, limit=top_k)
+                search_ms = (time.perf_counter() - t_search) * 1000
 
                 for row in results:
                     row["route_category"] = route_category
-                    row["query_source"] = query_source
+                    row["query_source"] = "raw_query"
 
-                base_timings = {
-                    "stage": "retrieval",
-                    "route_ms": 0.0,
-                    "locate_ms": round(retrieval_ms, 1),
-                    "validate_ms": 0.0,
-                    "retrieval_total_ms": round(retrieval_ms, 1),
-                    "top_k": int(cfg.get("retrieval.top_k", 5)),
-                    "hits": len(results),
-                    "llm_server_ready": False,
+                search_result = {
                     "category": route_category,
-                    "router_source": router_source,
-                    "query_source": query_source,
                     "standalone_query": standalone_query,
+                    "chunks": results,
+                    "heading_paths": list(
+                        {r.get("heading_path", "") for r in results if r.get("heading_path")}
+                    ),
+                    "router_source": "text_search_fallback",
                     "attempts": 1,
                     "validated": False,
+                    "timings": {"retrieval_total_ms": search_ms},
                     "reasoning_steps": [
-                        f"[路由] 启发式降级: 分类={route_category}",
-                        f"[定位] 文本搜索命中{len(results)}条",
-                        "[验证] LLM不可用，跳过验证",
+                        f"[降级] 图未加载，文本搜索命中{len(results)}条"
                     ],
                 }
-                self.timings_ready.emit(base_timings)
-                self.context_retrieved.emit(
-                    _build_display_results(results, route_category, query_source)
-                )
 
-                if not results:
-                    answer = "（未检索到相关内容，请先导入知识文档）"
-                    self.token_generated.emit(answer)
-                    _record_qa_memory(self.query, results, answer, mode="no_results")
-                    memory.append(self.query, answer, route_category, standalone_query)
-                    _log_rag_trace(
-                        query=self.query,
-                        standalone_query=standalone_query,
-                        route_category=route_category,
-                        query_source=query_source,
-                        results=results,
-                        prompt="(降级模式，无LLM)",
-                        answer=answer,
-                        timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
-                    )
-                    self.generation_finished.emit(True)
-                    return
-
-                answer = _build_retrieval_answer(
-                    results,
-                    f"本地 LLM 加载失败，已降级为文本搜索。\n原因：{llm.last_error or '请检查 llama-server 配置'}",
-                )
-                self.token_generated.emit(answer)
-                _record_qa_memory(self.query, results, answer, mode="llm_load_failed")
-                memory.append(self.query, answer, route_category, standalone_query)
-                _log_rag_trace(
-                    query=self.query,
-                    standalone_query=standalone_query,
-                    route_category=route_category,
-                    query_source=query_source,
-                    results=results,
-                    prompt="(降级模式)",
-                    answer=answer,
-                    timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
-                )
-                self.generation_finished.emit(True)
-                return
-
-            # 2. Multi-round self-verification search
-            t_search = time.perf_counter()
-            search_result = router.search(
-                query=self.query,
-                memory=memory.recent(),
-                chroma=chroma,
-            )
-            search_ms = (time.perf_counter() - t_search) * 1000
-
+            # Extract search results
             route_category = search_result["category"]
             standalone_query = search_result["standalone_query"]
             query_source = "standalone_query" if standalone_query != self.query else "raw_query"
             router_source = search_result["router_source"]
             results = search_result["chunks"]
-            attempts = search_result["attempts"]
-            validated = search_result["validated"]
+            attempts = search_result.get("attempts", 1)
+            validated = search_result.get("validated", True)
             router_timings = search_result.get("timings", {})
 
             for row in results:
@@ -475,20 +423,21 @@ class InferenceWorker(QThread):
                 row["query_source"] = query_source
                 row["standalone_query"] = standalone_query
 
-            route_ms = router_timings.get("route_ms", 0.0)
-            locate_ms = router_timings.get("locate_ms", 0.0)
-            validate_ms = router_timings.get("validate_ms", 0.0)
+            route_ms = router_timings.get("route_ms", router_timings.get("match_ms", 0.0))
+            locate_ms = router_timings.get("locate_ms", router_timings.get("traverse_ms", 0.0))
+            validate_ms = router_timings.get("validate_ms", router_timings.get("rank_ms", 0.0))
             reasoning_steps = search_result.get("reasoning_steps", [])
 
+            # Emit retrieval results immediately (before LLM load)
             base_timings = {
                 "stage": "retrieval",
                 "route_ms": round(route_ms, 1),
                 "locate_ms": round(locate_ms, 1),
                 "validate_ms": round(validate_ms, 1),
                 "retrieval_total_ms": round(search_ms, 1),
-                "top_k": int(cfg.get("retrieval.top_k", 5)),
+                "top_k": top_k,
                 "hits": len(results),
-                "llm_server_ready": bool(llm_was_loaded),
+                "llm_server_ready": False,
                 "category": route_category,
                 "router_source": router_source,
                 "query_source": query_source,
@@ -502,6 +451,7 @@ class InferenceWorker(QThread):
                 _build_display_results(results, route_category, query_source)
             )
 
+            # ── Phase 2: Handle no results ──────────────────────────
             if not results:
                 answer = "（未检索到相关内容，请先导入知识文档）"
                 self.token_generated.emit(answer)
@@ -513,14 +463,14 @@ class InferenceWorker(QThread):
                     route_category=route_category,
                     query_source=query_source,
                     results=results,
-                    prompt="(无检索结果，跳过提示词构建)",
+                    prompt="(无检索结果)",
                     answer=answer,
-                    timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
+                    timings={**base_timings, "llm_load_ms": 0.0, "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
                 )
                 self.generation_finished.emit(True)
                 return
 
-            # 3. Build prompt with conversation history
+            # ── Phase 3: Build prompt ──────────────────────────────
             prompt = _build_prompt(
                 query=standalone_query,
                 results=results,
@@ -528,10 +478,14 @@ class InferenceWorker(QThread):
                 conversation_history=memory.recent(),
             )
 
+            # ── Phase 4: Load LLM (only for generation) ────────────
+            llm = LLMManager()
+            llm_was_loaded = llm.is_loaded
+
             if not cfg.get("llm.enabled", True):
                 answer = _build_retrieval_answer(
                     results,
-                    "本地 LLM 当前已禁用，先展示路由检索结果。",
+                    "本地 LLM 当前已禁用，先展示检索结果。",
                 )
                 self.token_generated.emit(answer)
                 _record_qa_memory(self.query, results, answer, mode="retrieval_only")
@@ -549,7 +503,32 @@ class InferenceWorker(QThread):
                 self.generation_finished.emit(True)
                 return
 
-            # 4. Stream generation
+            t_load = time.perf_counter()
+            llm_loaded_now = llm.load()
+            llm_load_ms = (time.perf_counter() - t_load) * 1000
+
+            if not llm_loaded_now:
+                answer = _build_retrieval_answer(
+                    results,
+                    f"本地 LLM 加载失败，已降级为检索结果直出。\n原因：{llm.last_error or '请检查 llama-server 配置'}",
+                )
+                self.token_generated.emit(answer)
+                _record_qa_memory(self.query, results, answer, mode="llm_load_failed")
+                memory.append(self.query, answer, route_category, standalone_query)
+                _log_rag_trace(
+                    query=self.query,
+                    standalone_query=standalone_query,
+                    route_category=route_category,
+                    query_source=query_source,
+                    results=results,
+                    prompt=prompt,
+                    answer=answer,
+                    timings={**base_timings, "llm_load_ms": round(llm_load_ms, 1), "generation_ms": 0.0, "total_ms": (time.perf_counter() - overall_t0) * 1000},
+                )
+                self.generation_finished.emit(True)
+                return
+
+            # ── Phase 5: Stream generation ─────────────────────────
             t2 = time.perf_counter()
             answer_parts: List[str] = []
             llm_generation_error = ""
@@ -583,6 +562,7 @@ class InferenceWorker(QThread):
                 "llm_load_ms": round(llm_load_ms, 1),
                 "generation_ms": round(generation_ms, 1),
                 "total_ms": round(total_ms, 1),
+                "llm_server_ready": bool(llm_was_loaded),
             }
             self.timings_ready.emit(complete_timings)
 

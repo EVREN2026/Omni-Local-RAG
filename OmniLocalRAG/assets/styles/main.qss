@@ -83,6 +83,65 @@ QMenu::separator {
     padding: 0 8px;
 }
 
+/* ── Spotlight Toolbar ──────────────────────────────────── */
+#SpotlightToolbar {
+    background: transparent;
+}
+
+#ResourceLabel {
+    color: rgba(231, 237, 242, 160);
+    font-size: 11px;
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+    min-width: 58px;
+}
+
+#ModelComboBox {
+    background: rgba(255, 255, 255, 10);
+    border: 1px solid rgba(255, 255, 255, 18);
+    border-radius: 10px;
+    padding: 3px 8px;
+    color: #e7edf2;
+    font-size: 12px;
+    min-height: 24px;
+}
+
+#ModelComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+#ModelComboBox QAbstractItemView {
+    background: rgba(18, 22, 30, 240);
+    border: 1px solid rgba(255, 255, 255, 22);
+    border-radius: 8px;
+    selection-background-color: rgba(92, 178, 233, 0.22);
+    color: #e7edf2;
+}
+
+#LoadModelButton, #ImportButton, #RebuildButton {
+    background: rgba(255, 255, 255, 14);
+    border: 1px solid rgba(255, 255, 255, 22);
+    border-radius: 10px;
+    color: #c8d6e0;
+    font-size: 11px;
+    min-height: 24px;
+    padding: 0 8px;
+}
+
+#LoadModelButton:hover, #ImportButton:hover, #RebuildButton:hover {
+    background: rgba(124, 211, 183, 30);
+    border: 1px solid rgba(124, 211, 183, 70);
+    color: #edf4fa;
+}
+
+/* ── Elapsed time label ─────────────────────────────────── */
+#ElapsedLabel {
+    color: rgba(231, 237, 242, 140);
+    font-size: 11px;
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+    padding: 0 8px;
+}
+
 /* ── Search input ────────────────────────────────────────── */
 #SearchInput {
     background: rgba(255, 255, 255, 10);

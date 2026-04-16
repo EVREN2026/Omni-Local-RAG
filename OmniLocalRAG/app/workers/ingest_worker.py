@@ -287,3 +287,12 @@ class IngestWorker(QThread):
 
         self.stage_changed.emit("导入完成")
         self.finished.emit(True)
+
+        # Update knowledge graph incrementally
+        try:
+            from app.models.graph_updater import GraphUpdater
+            updater = GraphUpdater()
+            updater.on_chunks_added(export_rows, source_file=self.file_path)
+            updater.maybe_recluster()
+        except Exception as e:
+            logger.debug(f"Graph update after ingest skipped: {e}")

@@ -136,6 +136,27 @@ def get(key_path: str, default: Any = None) -> Any:
     return cfg if cfg is not None else default
 
 
+def set(key_path: str, value: Any) -> None:
+    """Dot-separated key set, e.g. set('llm.model_path', 'models/new.gguf').
+    Updates in-memory cache and persists to config.json."""
+    cfg = load()
+    keys = key_path.split(".")
+    for k in keys[:-1]:
+        if isinstance(cfg, dict):
+            cfg = cfg.setdefault(k, {})
+        else:
+            return
+    if isinstance(cfg, dict) and keys:
+        cfg[keys[-1]] = value
+    # Persist to disk
+    try:
+        _CONFIG_PATH.write_text(
+            json.dumps(_cache, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
 def abs_path(relative: str) -> Path:
     """Resolve a config-relative path to an absolute path."""
     return _BASE / relative

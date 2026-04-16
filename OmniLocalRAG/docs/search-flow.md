@@ -1,7 +1,8 @@
 # OmniLocalRAG — 用户检索完整执行流程
 
-> 文档版本：2026-04-15（Gemma 驱动全链路架构）
+> 文档版本：2026-04-16-v2（知识图谱遍历 + 三层模糊匹配架构）
 > 覆盖范围：用户按下 Enter 到回答渲染完毕的全链路，含所有分支路径
+> 核心变更：检索阶段零 LLM 调用，三层模糊匹配（精确子串 → N-gram → 编辑距离），仅最终回答生成依赖 llama-server
 
 ---
 
@@ -13,19 +14,28 @@
 SpotlightWindow
   └─ SearchController
        └─ InferenceWorker.run()
-            ├─ LLMManager.load()           → 确保 llama-server 启动
-            ├─ GemmaRouter.search()        → 多轮自证搜索
-            │    ├─ route()                → 意图路由 + 查询改写
-            │    │    └─ LLMHttpClient.chat_once() → JSON {category, standalone_query}
-            │    ├─ locate()               → 文档定位（heading_path 选择）
-            │    │    ├─ ChromaStore.list_headings(category)
-            │    │    └─ LLMHttpClient.chat_once() → JSON {selected_indices}
-            │    ├─ validate()             → 验证定位合理性
-            │    │    └─ LLMHttpClient.chat_once() → JSON {valid, reason}
-            │    └─ [重试] → 回到 locate()（最多 max_validate_retries 轮）
-            ├─ _build_prompt()             → 构建含对话历史的 RAG 提示词
-            └─ LLMManager.generate()       → 流式 token 迭代器
-                 └─ LLMHttpClient.chat_stream() → HTTP SSE → llama-server
+            │
+            ├─ Phase 1: 检索（零 LLM，纯内存 ~10-50ms）
+            │    ├─ GraphTraverser._condense()            → 启发式查询改写
+            │    ├─ KnowledgeGraph.find_nodes()           → 三层模糊匹配起始节点
+            │    │    ├─ Layer 1: 精确子串匹配（最高分）
+            │    │    ├─ Layer 2: N-gram 部分匹配（中分）
+            │    │    └─ Layer 3: 编辑距离模糊匹配（低分）
+            │    ├─ KnowledgeGraph.traverse_bfs()         → BFS 扩展相关节点
+            │    ├─ GraphTraverser._rank_by_community()   → 社区内聚度排序（同三层模糊）
+            │    └─ GraphTraverser._resolve_chunks()      → 获取 chunk 内容
+            │
+            ├─ context_retrieved.emit()  → 立即发射检索结果（不等 LLM）
+            │
+            ├─ Phase 2: LLM 加载（仅生成需要）
+            │    └─ LLMManager.load()    → 确保 llama-server 启动
+            │
+            ├─ Phase 3: 构建提示词
+            │    └─ _build_prompt()      → 构建含对话历史的 RAG 提示词
+            │
+            └─ Phase 4: 流式生成
+                 └─ LLMManager.generate() → 流式 token 迭代器
+                      └─ LLMHttpClient.chat_stream() → HTTP SSE → llama-server
 ```
 
 信号跨线程传递（Qt 队列连接，安全）：
@@ -123,149 +133,168 @@ def search(self, query: str) -> None:
 ```python
 overall_t0 = time.perf_counter()         # 全程计时起点
 chroma = ChromaStore()                   # 获取单例
-llm    = LLMManager()                    # 获取单例
 memory = _ConversationMemory()           # 对话滑窗（最近 5 轮）
-router = GemmaRouter()                   # 多轮自证路由引擎
-llm_was_loaded = llm.is_loaded           # 记录 llama-server 是否已就绪
+top_k = int(cfg.get("retrieval.top_k", 5))
 ```
 
 ---
 
-### 3.2 — LLM 加载：`LLMManager.load()`
+### 3.2 — 图遍历检索：`GraphTraverser.search()`
+
+**文件：** `app/models/graph_traverser.py`
 
 ```python
-llm_loaded_now = llm.load()
-```
-
-若加载失败，进入**降级模式**：启发式路由 + SQL 文本搜索。
-
----
-
-### 3.3 — 多轮自证搜索：`GemmaRouter.search()`
-
-**文件：** `app/models/gemma_router.py`
-
-```python
-search_result = router.search(
-    query=self.query,
-    memory=memory.recent(),
-    chroma=chroma,
-)
+kg = KnowledgeGraph()
+if kg.is_loaded():
+    traverser = GraphTraverser()
+    search_result = traverser.search(
+        query=self.query,
+        memory=memory.recent(),
+        top_k=top_k,
+    )
+else:
+    # 降级: ChromaStore.search_text()
+    search_result = _fallback_text_search(...)
 ```
 
 **完整流程：**
 
 ```
-GemmaRouter.search()
+GraphTraverser.search()
 │
-├─ Phase 1: route() — 意图路由
-│   ├─ router.enabled == False → 启发式 fallback
-│   ├─ llm.enabled == False → 启发式 fallback
-│   ├─ LLM 调用失败 → 启发式 fallback
-│   └─ LLM 路由成功 → {category, standalone_query, router_source="llm"}
+├─ Phase 1: _condense() — 启发式查询改写
+│   └─ 检测代词 → 拼接上一轮 standalone_query
 │
-├─ Phase 2: locate() — 文档定位（最多重试 max_validate_retries 轮）
-│   ├─ ChromaStore.list_headings(category) → 获取该分类下所有 heading_path
-│   ├─ LLM 选择最匹配的 heading_path → JSON {selected_indices}
-│   ├─ ChromaStore.get_by_heading(heading_path) → 获取对应 chunks
-│   └─ LLM 定位失败 → fallback: ChromaStore.search_text()
+├─ Phase 2: KnowledgeGraph.find_nodes() — 三层模糊匹配
+│   ├─ Layer 1: 精确子串匹配（score: heading=3.0, label=2.5, other=1.5）
+│   ├─ Layer 2: N-gram 部分匹配（score: ratio × 1.5）
+│   └─ Layer 3: 编辑距离模糊匹配（score: similarity × 1.0, threshold ≥ 0.7）
 │
-├─ Phase 3: validate() — 验证定位
-│   ├─ LLM 判断定位内容是否足以回答问题 → JSON {valid, reason, missing}
-│   └─ valid == False → 扩大范围重试（回到 Phase 2）
+├─ Phase 3: KnowledgeGraph.traverse_bfs() — BFS 遍历扩展
+│   └─ 从匹配节点出发，max_depth=3, max_nodes=50
 │
-└─ 返回: {category, standalone_query, chunks, heading_paths,
-│         router_source, attempts, validated, timings}
+├─ Phase 4: _rank_by_community() — 社区感知排序（同三层模糊匹配）
+│   ├─ 三层模糊匹配 → relevance 分数
+│   ├─ 社区内聚度 → cohesion 加分
+│   ├─ 节点度数 → degree 加分
+│   └─ 综合排序: score = relevance × 2.0 + cohesion × 1.0 + degree_bonus × 0.5
+│
+└─ Phase 5: _resolve_chunks() — 从 ChromaStore 获取 chunk 内容
+    └─ 通过 chunk_id 查询 vectors 表
 ```
 
-#### Phase 1: route() — 意图路由
-
-**Few-shot Prompt（`router.few_shot_examples=true` 时）：**
-
-```
-你是 OmniLocalRAG 的意图路由器。请基于对话历史和当前问题输出严格 JSON，不要输出解释。
-允许的 category 只有：tech_manual, business_sop, company_intro, parameter, process, project_code, general。
-输出格式：{"category":"...","standalone_query":"..."}
-
-规则：
-- standalone_query 必须是独立可检索问题，将代词替换为实际指代内容。
-- 如果问题偏安装、接口、技术排障、参数配置，category=tech_manual。
-- 如果问题偏流程制度、业务SOP，category=business_sop。
-- 如果问题偏公司介绍、概况，category=company_intro。
-- 如果问题偏参数表、规格数据，category=parameter。
-- 如果问题偏操作流程、步骤，category=process。
-- 如果问题涉及项目代号，category=project_code。
-- 不确定时 category=general。
-
-示例：
-...
-
-对话历史：
-{history_text}
-
-当前问题：{query}
-输出：
-```
-
-**启发式 fallback：**
+#### Phase 1: `_condense()` — 启发式查询改写
 
 ```python
-# 查询改写：检测代词，拼接上一轮查询
+# 检测追问代词（它、这个、那个、上面、上述...）
 if any(marker in query for marker in _FOLLOWUP_MARKERS):
-    condensed = f"基于"{last_standalone_query}"：{query}"
-
-# 分类：关键词匹配
-if _contains_any(text, _TECH_KEYWORDS): category = "tech_manual"
-elif _contains_any(text, _BUSINESS_KEYWORDS): category = "business_sop"
-else: category = "general"
+    condensed = f'基于"{last_standalone_query}"：{query}'
 ```
 
-#### Phase 2: locate() — 文档定位
+#### Phase 2: `find_nodes()` — 三层模糊匹配
 
-**定位 Prompt：**
-
-```
-以下是 [category] 分类下的文档标题索引：
-1. 快速入门 > 工控机IP配置教程 (3 chunks)
-2. 快速入门 > 工控机IP配置教程 > a. 打开网络连接 (1 chunks)
-3. 系统参数 > 网络参数 > 速度和双工 (2 chunks)
-...
-
-用户问题：{standalone_query}
-
-请选择最相关的标题编号（可多选），输出 JSON：
-{"selected_indices": [1, 3], "reason": "..."}
-只输出 JSON，不要输出解释。
-```
-
-**定位后获取 chunks：**
+**核心算法**，替代精确子串匹配，实现模糊检索能力：
 
 ```python
-for heading in selected_headings:
-    chunks = chroma.get_by_heading(heading["heading_path"], category=category)
-    all_chunks.extend(chunks)
+def find_nodes(self, query: str, top_k: int = 5) -> List[Tuple[float, str]]:
+    terms = self._extract_terms(query)       # 提取中英文关键词
+    query_ngrams = self._build_ngrams(terms) # 生成 2-gram 片段
+
+    for nid, ndata in self._G.nodes(data=True):
+        combined = f"{label} {heading} {category}"
+        score = 0.0
+
+        # Layer 1: 精确子串匹配（最高分）
+        for term in terms:
+            if term in combined:
+                if term in heading: score += 3.0
+                elif term in label: score += 2.5
+                else: score += 1.5
+
+        # Layer 2: N-gram 部分匹配（中分）
+        if score == 0.0:
+            ngram_hits = sum(1 for ng in query_ngrams if ng in combined)
+            if ngram_hits > 0:
+                score += (ngram_hits / len(query_ngrams)) * 1.5
+
+        # Layer 3: 编辑距离模糊匹配（低分）
+        if score == 0.0:
+            for term in terms:
+                for ntoken in node_tokens:
+                    similarity = 1.0 - (edit_distance / max_len)
+                    if similarity >= 0.7:
+                        score += similarity * 1.0
 ```
 
-#### Phase 3: validate() — 验证定位
+**三层匹配策略详解：**
 
-**验证 Prompt：**
+| 层级 | 方法 | 分数范围 | 适用场景 | 示例 |
+|------|------|---------|---------|------|
+| Layer 1 | 精确子串匹配 | 1.5-3.0 | 查询词完整出现在节点文本中 | 查"工控机IP配置" → 命中"工控机IP配置教程" |
+| Layer 2 | N-gram 部分匹配 | 0-1.5 | 查询词部分片段匹配 | 查"网络参数设置" → "网络参"匹配"网络参数" |
+| Layer 3 | 编辑距离模糊匹配 | 0-1.0 | 拼写变体、近似词 | 查"configration" → 匹配"configuration" (sim=0.87) |
+
+**辅助方法：**
+
+- `_build_ngrams(terms, n=2)`: 从关键词生成 2-gram 片段。如 `"工控机"` → `["工控", "控机"]`
+- `_edit_distance(s1, s2)`: Levenshtein 编辑距离（动态规划，O(mn)）。如 `edit_distance("config", "cnfig") = 1`
+- `_extract_terms(query)`: 提取中英文关键词，正则 `_KEYWORD_RE = [A-Za-z0-9_.:/\\-]{2,}|[\u4e00-\u9fff]{2,}`
+
+#### Phase 3: `traverse_bfs()` — BFS 遍历
+
+```python
+def traverse_bfs(self, start_nodes, max_depth=3, max_nodes=50):
+    """从匹配节点出发，BFS 扩展到相关节点。"""
+    visited = set(start_nodes)
+    for _ in range(max_depth):
+        next_frontier = set()
+        for n in frontier:
+            for neighbor in G.neighbors(n):
+                if neighbor not in visited and len(visited) < max_nodes:
+                    next_frontier.add(neighbor)
+                    edges.append((n, neighbor))
+        visited.update(next_frontier)
+        frontier = next_frontier
+    return visited, edges
+```
+
+#### Phase 4: `_rank_by_community()` — 社区感知排序
+
+与 `find_nodes()` 使用**相同的三层模糊匹配**计算 relevance 分数，叠加社区内聚度和节点度数加分：
 
 ```
-用户问题：{query}
-
-定位到的内容：
-[1] 快速入门 > 工控机IP配置教程
-- i. 点击"使用下面的 IP 地址"。
-- ii. 依次填写：...
-
-这些内容是否足以回答用户问题？
-输出 JSON：{"valid": true/false, "reason": "...", "missing": "..."}
-只输出 JSON，不要输出解释。
+score = relevance × 2.0 + cohesion × 1.0 + degree_bonus × 0.5
 ```
 
-**重试策略：**
-- 验证失败且重试次数 < max_validate_retries → 回到 locate() 扩大范围
-- 扩大范围：先尝试 category="general"，再尝试文本搜索补充
+- **relevance**: 三层模糊匹配分数（与 find_nodes 相同算法）
+- **cohesion**: 社区内聚度 = 实际边数 / 最大可能边数（0-1）
+- **degree_bonus**: min(degree / 10, 1.0)，高度连接节点更中心
+
+#### Phase 5: `_resolve_chunks()` — 获取 chunk 内容
+
+```python
+for nid in ranked_nodes[:top_k]:
+    chunk_id = ndata.get("chunk_id", nid)
+    row = chroma._conn().execute("SELECT * FROM vectors WHERE id=?", (chunk_id,)).fetchone()
+    chunk = ChromaStore._row_to_dict(row)
+```
+
+---
+
+### 3.3 — 降级路径
+
+图未加载或为空时，自动降级为 `ChromaStore.search_text()`（SQL LIKE 搜索）：
+
+```python
+if not kg.is_loaded():
+    route_category = _heuristic_category(self.query)
+    results = chroma.search_text(self.query, limit=top_k)
+    search_result = {
+        "router_source": "text_search_fallback",
+        "validated": False,
+        ...
+    }
+```
 
 ---
 
@@ -277,6 +306,8 @@ self.timings_ready.emit({
     "route_ms": ..., "locate_ms": ..., "validate_ms": ...,
     "retrieval_total_ms": ..., "top_k": ..., "hits": len(results),
     "attempts": ..., "validated": ...,
+    "router_source": "graph_traversal",  # 或 "text_search_fallback"
+    "reasoning_steps": [...],
 })
 
 self.context_retrieved.emit(_build_display_results(results))
@@ -492,35 +523,28 @@ QApplication.clipboard().setText(citation)
     → _search_ctrl.search(query)
       → InferenceWorker(query).start()
                                    ─────→ run() 开始
-                                          ┌─ LLMManager.load()
-                                          │   └─ LlamaServerManager().ensure_started()
-                                          │       → 启动 llama-server 子进程
-                                          │       → 轮询 GET /health
-                                          │
-                                          ├─ GemmaRouter.search()
-                                          │   ├─ route()
-                                          │   │   ├─ Few-shot Prompt 构建
-                                          │   │   ├─ LLMHttpClient.chat_once() (非流式)
-                                          │   │   └─ JSON 解析 → {category, standalone_query}
+                                          ┌─ KnowledgeGraph.is_loaded()?
+                                          │   ├─ Yes → GraphTraverser.search()
+                                          │   │   ├─ _condense() → standalone_query
+                                          │   │   ├─ find_nodes() → 三层模糊匹配起始节点
+                                          │   │   │   ├─ Layer 1: 精确子串 (heading=3.0, label=2.5)
+                                          │   │   │   ├─ Layer 2: N-gram 部分匹配 (×1.5)
+                                          │   │   │   └─ Layer 3: 编辑距离模糊 (≥0.7, ×1.0)
+                                          │   │   ├─ traverse_bfs() → 扩展相关节点
+                                          │   │   ├─ _rank_by_community() → 社区感知排序
+                                          │   │   └─ _resolve_chunks() → ChromaStore 查询
                                           │   │
-                                          │   ├─ locate()
-                                          │   │   ├─ ChromaStore.list_headings(category)
-                                          │   │   ├─ LLMHttpClient.chat_once() → {selected_indices}
-                                          │   │   └─ ChromaStore.get_by_heading() → chunks
-                                          │   │
-                                          │   ├─ validate()
-                                          │   │   ├─ LLMHttpClient.chat_once() → {valid, reason}
-                                          │   │   └─ [验证失败] → 回到 locate()（扩大范围）
-                                          │   │
-                                          │   └─ 返回 {chunks, heading_paths, attempts, validated}
+                                          │   └─ No → ChromaStore.search_text() (SQL LIKE)
                                           │
                                    ←───── timings_ready（stage=retrieval）
-  ← _on_timings() — "路由 Xms 定位 Xms 验证 Xms 分类 tech_manual 尝试 1 轮 ✓"
+  ← _on_timings() — "匹配 Xms 遍历 Xms 排序 Xms 分类 tech_manual 图遍历 ✓"
                                    ←───── context_retrieved(results)
   ← _on_context(results)
       build_card() × N 张
       自动选中 card[0]
                                           _build_prompt(standalone_query, results, category, memory.recent())
+                                          LLMManager.load()
+                                            → LlamaServerManager().ensure_started()
                                           LLMManager.generate(prompt, stream=True)
                                             → POST /v1/chat/completions (SSE)
                                    ←───── token_generated(token₁)
@@ -550,31 +574,33 @@ QApplication.clipboard().setText(citation)
 ```
 InferenceWorker.run()
 │
-├─ LLMManager.load() 失败 → 降级模式
-│   ├─ 启发式路由 → ChromaStore.search_text()
-│   ├─ 无结果 → "未检索到相关内容"
-│   └─ 有结果 → _build_retrieval_answer("加载失败…")
-│       mode="llm_load_failed"
-│       generation_finished.emit(True)
+├─ KnowledgeGraph.is_loaded() == True
+│   └─ GraphTraverser.search() — 图遍历检索
+│       ├─ _condense() — 启发式查询改写
+│       │
+│       ├─ find_nodes() — 三层模糊匹配
+│       │   ├─ Layer 1 命中 → 返回匹配节点（高分）
+│       │   ├─ Layer 2 命中 → 返回部分匹配节点（中分）
+│       │   ├─ Layer 3 命中 → 返回模糊匹配节点（低分）
+│       │   └─ 全层未命中 → 空列表
+│       │
+│       ├─ 无匹配节点 → _fallback_text_search()
+│       │   └─ ChromaStore.search_text() → SQL LIKE 搜索
+│       │
+│       ├─ traverse_bfs() → BFS 扩展
+│       │
+│       ├─ _rank_by_community() → 社区感知排序
+│       │   ├─ 三层模糊匹配 → relevance
+│       │   ├─ 社区内聚度 → cohesion
+│       │   └─ 节点度数 → degree_bonus
+│       │
+│       └─ _resolve_chunks() → ChromaStore 查询
+│           └─ 返回 {category, standalone_query, chunks, heading_paths,
+│                   router_source="graph_traversal", validated=True}
 │
-├─ GemmaRouter.search() — 多轮自证搜索
-│   ├─ route()
-│   │   ├─ router.enabled == False → 启发式 fallback
-│   │   ├─ llm.enabled == False → 启发式 fallback
-│   │   ├─ LLM 路由成功 → {category, standalone_query, router_source="llm"}
-│   │   └─ LLM 路由失败 → 启发式 fallback
-│   │
-│   ├─ locate()
-│   │   ├─ LLM 选择 heading_path → ChromaStore.get_by_heading() → chunks
-│   │   └─ LLM 定位失败 → ChromaStore.search_text() → chunks
-│   │
-│   ├─ validate()
-│   │   ├─ valid == True → 使用当前 chunks
-│   │   └─ valid == False → 重试 locate()（扩大范围）
-│   │       ├─ category != "general" → 改为 general 重试
-│   │       └─ category == "general" → 补充文本搜索
-│   │
-│   └─ 返回 {chunks, heading_paths, attempts, validated}
+├─ KnowledgeGraph.is_loaded() == False
+│   └─ 降级: ChromaStore.search_text()
+│       └─ 返回 {router_source="text_search_fallback", validated=False}
 │
 ├─ 无检索结果
 │   └─ token_generated.emit("（未检索到相关内容…）")
@@ -583,6 +609,10 @@ InferenceWorker.run()
 ├─ 有结果，cfg.llm.enabled == False
 │   └─ token_generated.emit(_build_retrieval_answer())
 │       mode="retrieval_only"
+│
+├─ 有结果，LLM 加载失败
+│   └─ token_generated.emit(_build_retrieval_answer("加载失败…"))
+│       mode="llm_load_failed"
 │
 ├─ 有结果，LLM 生成循环：
 │   ├─ 正常流式输出 token₁…tokenN
@@ -613,10 +643,11 @@ InferenceWorker.run()
 
 | 阶段 | 对象 | 关键字段 |
 |---|---|---|
-| 路由后 | `route: dict` | `category: str`、`standalone_query: str`、`router_source: "llm"\|"heuristic"` |
-| 定位后 | `locate: dict` | `heading_paths: list[str]`、`chunks: list[dict]`、`confidence: float` |
-| 验证后 | `validate: dict` | `valid: bool`、`reason: str`、`missing: str` |
-| search 后 | `search_result: dict` | `category, standalone_query, chunks, heading_paths, router_source, attempts, validated, timings` |
+| 查询改写后 | `standalone_query: str` | 启发式改写结果，代词替换 |
+| 模糊匹配后 | `matched: List[Tuple[float, str]]` | `[(score, node_id), ...]` 按分数降序 |
+| BFS 遍历后 | `visited: Set[str], edges: List[Tuple]` | 访问节点集合 + 遍历边列表 |
+| 社区排序后 | `ranked_nodes: List[str]` | 按综合分数排序的节点 ID 列表 |
+| search 后 | `search_result: dict` | `category, standalone_query, chunks, heading_paths, router_source, attempts, validated, timings, reasoning_steps` |
 | ChromaStore 行 | `result: dict` | `id, content, source_type, anchor_id, category, heading_path, pdf_payload(dict), video_payload(dict)` |
 | _build_display_results 后 | 增广列表 | 同上 + `route_category, query_source, standalone_query` + 合成的 `source_type="video"` 卡片 |
 | LLM prompt | `prompt: str` | 对话历史段落 + N 个编号段落（含 category/path/type/desc/content）+ 9条规则 + 问题 |
@@ -640,30 +671,58 @@ InferenceWorker.run()
 
 ## 架构注意事项
 
-1. **Gemma 驱动全链路**
-   路由、定位、验证全部由 Gemma-4-2b 完成，不再依赖 BGE-M3 嵌入模型。
-   LLM 不可用时降级为启发式路由 + SQL 文本搜索。
+1. **知识图谱遍历检索（零 LLM）**
+   检索阶段完全由内存知识图谱驱动，不依赖任何 LLM 调用。
+   关键词匹配→BFS 遍历→社区排序→置信度过滤，全程纯内存操作。
+   检索延迟从 ~1-2s 降至 ~10-50ms。
 
-2. **多轮自证检索**
-   路由→定位→验证→(重试) 流程确保检索结果与用户意图匹配。
-   最多重试 `router.max_validate_retries`（默认 3）轮。
+2. **三层模糊匹配**
+   `find_nodes()` 和 `_rank_by_community()` 均使用三层模糊匹配策略：
+   - **Layer 1 — 精确子串匹配**：查询词完整出现在节点文本中，heading 匹配得分最高(3.0)，label 次之(2.5)，其他(1.5)
+   - **Layer 2 — N-gram 部分匹配**：将查询词拆为 2-gram 片段，计算匹配比例 × 1.5。处理部分匹配、截断查询
+   - **Layer 3 — 编辑距离模糊匹配**：Levenshtein 距离计算相似度，阈值 ≥ 0.7 才计入。处理拼写变体、近似词
+   - 三层逐级降级：Layer 1 命中则跳过 Layer 2/3，Layer 2 命中则跳过 Layer 3
 
-3. **heading_path 精确定位**
+3. **LLM 仅用于生成**
+   llama-server 仅在检索完成后、生成回答前加载。
+   搜索链路中唯一的 LLM 调用是最终的流式生成。
+   入库时 auto_tag() 也使用 LLM（可选）。
+
+4. **知识图谱构建**
+   从 ChromaStore + SQLiteStore 自动构建：
+   - 每个 chunk → 图节点（label=heading_path+category）
+   - heading_path 层级 → references 边
+   - cross_modal_map → shares_data_with 边
+   - 同 category + 同 source → conceptually_related_to 边
+   - 同 source 相邻 chunk → references 边
+
+5. **社区检测（Louvain）**
+   应用启动时运行 Louvain 社区检测，将节点聚类为社区。
+   搜索时优先返回高内聚社区的结果，跨社区通过 god nodes 桥接。
+   图变更时增量重聚类。
+
+6. **降级路径**
+   图未加载/为空时，自动降级为 ChromaStore.search_text()（SQL LIKE 搜索）。
+   模糊匹配无结果时，也降级到文本搜索。
+   保证在任何情况下搜索功能可用。
+
+7. **heading_path 精确定位**
    利用文档的父子标题结构实现内容精确定位，比向量模糊匹配更精准。
+   图中 heading_path 层级边保留了这一优势。
 
-4. **ChromaStore 简化**
+8. **ChromaStore 简化**
    移除了 embedding BLOB 和 sparse_payload 列，新增 heading_path 列和 SQL 索引。
    查询方法从向量余弦+稀疏打分改为 SQL WHERE/LIKE 查询。
 
-5. **`_render_preview` 调用频率**
+9. **`_render_preview` 调用频率**
    每收到一个 token 调用一次，高速生成时可能每秒几十次调用 `setHtml()`，存在性能瓶颈。
 
-6. **信号线程安全**
-   Qt 跨线程信号默认使用队列连接（`Qt.QueuedConnection`），所有 UI 槽在主线程事件循环中执行，无数据竞争。
+10. **信号线程安全**
+    Qt 跨线程信号默认使用队列连接（`Qt.QueuedConnection`），所有 UI 槽在主线程事件循环中执行，无数据竞争。
 
-7. **溯源链接**
-   回答中的 `[1]`、`[2]` 引用标记渲染为可点击链接（`anchor://` / `video://` scheme），
-   点击后跳转到对应的命中内容卡片或打开视频播放器。
+11. **溯源链接**
+    回答中的 `[1]`、`[2]` 引用标记渲染为可点击链接（`anchor://` / `video://` scheme），
+    点击后跳转到对应的命中内容卡片或打开视频播放器。
 
 ---
 
@@ -671,7 +730,8 @@ InferenceWorker.run()
 
 | 服务 | 启动时机 | 进程类型 | 端口/路径 | 说明 |
 |------|---------|---------|-----------|------|
-| **llama-server.exe** | 首次搜索时懒加载 | 子进程（`subprocess.Popen`） | `127.0.0.1:8000` | Gemma-4-2b 模型，承载路由+定位+验证+生成 |
+| **llama-server.exe** | 首次生成时懒加载 | 子进程（`subprocess.Popen`） | `127.0.0.1:8000` | Gemma-4-2b 模型，仅用于回答生成 + 入库 auto_tag |
+| **KnowledgeGraph** | 应用启动时加载 | 进程内（NetworkX 内存图） | `data/knowledge_graph/graph.json` | 知识图谱，承载检索逻辑 |
 | **SQLite vectors.db** | 首次查询时连接 | 进程内（sqlite3 连接） | `data/vectors/vectors.db` | 文档存储，含 category + heading_path 索引 |
 | **SQLite omni.db** | 跨模态查询时连接 | 进程内（sqlite3 连接） | `data/omni.db` | PDF↔视频绑定关系 |
 
@@ -710,3 +770,39 @@ LlamaServerManager().ensure_started(model_path)
         ├─ 子进程退出 → 返回 False
         └─ 超时 → 返回 False
 ```
+
+---
+
+## 知识图谱数据模型
+
+### 节点属性
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `id` | str | 唯一标识（chunk_id） |
+| `label` | str | 显示标签（heading_path + category） |
+| `file_type` | str | 文件类型（document/code/image） |
+| `source_file` | str | 来源文件名 |
+| `source_location` | str | 文件内位置 |
+| `chunk_id` | str | 关联的 ChromaStore chunk ID |
+| `category` | str | 分类（tech_manual/business_sop/...） |
+| `heading_path` | str | 标题层级路径 |
+
+### 边属性
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `relation` | str | 关系类型（references/shares_data_with/conceptually_related_to） |
+| `confidence` | str | 置信度级别（EXTRACTED/INFERRED/AMBIGUOUS） |
+| `confidence_score` | float | 置信度分数（0-1） |
+| `source_file` | str | 来源文件 |
+| `weight` | float | 边权重 |
+
+### 边生成规则
+
+| 规则 | 关系 | 置信度 | 说明 |
+|------|------|--------|------|
+| heading_path 层级 | `references` | EXTRACTED (1.0) | `A > B > C` → A→B, B→C |
+| cross_modal_map | `shares_data_with` | EXTRACTED (1.0) | PDF anchor ↔ video clip |
+| 同 category + 同 source | `conceptually_related_to` | EXTRACTED (1.0) | 同类同源关联 |
+| 同 source 相邻 chunk | `references` | EXTRACTED (1.0) | 顺序关系 |

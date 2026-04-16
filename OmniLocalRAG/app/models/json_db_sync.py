@@ -187,6 +187,32 @@ def sync_json_to_db(
         f"skipped={counts['skipped']} errors={counts['errors']} "
         f"in {elapsed:.1f}s"
     )
+
+    # Update knowledge graph incrementally
+    if counts["inserted"] > 0 or counts["updated"] > 0:
+        try:
+            from app.models.graph_updater import GraphUpdater
+            updater = GraphUpdater()
+            # Build chunk list for graph update
+            graph_chunks = []
+            for chunk in chunks:
+                chunk_id = chunk.get("chunk_id") or chunk.get("anchor_id", "")
+                if chunk_id:
+                    graph_chunks.append({
+                        "id": chunk_id,
+                        "chunk_id": chunk_id,
+                        "content": chunk.get("content", ""),
+                        "heading_path": chunk.get("heading_path", ""),
+                        "category": heuristic_category(
+                            f"{source_file} {chunk.get('heading_path', '')} {chunk.get('content', '')[:300]}"
+                        ),
+                    })
+            if graph_chunks:
+                updater.on_chunks_added(graph_chunks, source_file=source_file)
+                updater.maybe_recluster()
+        except Exception as e:
+            logger.debug(f"Graph update after sync skipped: {e}")
+
     return counts
 
 

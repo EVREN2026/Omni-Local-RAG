@@ -58,6 +58,7 @@ faulthandler.enable()
 # -- Must be first PyQt5 import --
 from PyQt5.QtWidgets import QApplication
 
+from app.utils import config as cfg
 from app.utils.logger import logger
 
 
@@ -116,6 +117,36 @@ def main() -> int:
             logger.warning("ChromaStore unavailable — search disabled until restart")
     except Exception:
         logger.error("ChromaStore connect raised exception", exc_info=True)
+
+    # ------------------------------------------------------------------ #
+    # 3b. Knowledge Graph (load or build from DB)
+    # ------------------------------------------------------------------ #
+    logger.info("Step 3b/7 — Knowledge Graph init")
+    try:
+        from app.models.knowledge_graph import KnowledgeGraph
+        kg = KnowledgeGraph()
+        graph_path = cfg.abs_path("data/knowledge_graph/graph.json")
+        if graph_path.exists():
+            kg.load(graph_path)
+            logger.info(f"KnowledgeGraph loaded from {graph_path}")
+        else:
+            # First run: build from existing DB
+            from app.models.graph_builder import GraphBuilder
+            builder = GraphBuilder()
+            G = builder.build(ChromaStore(), SQLiteStore())
+            if G.number_of_nodes() > 0:
+                kg._G = G
+                kg.detect_communities()
+                kg.save(graph_path)
+                kg._loaded = True
+                logger.info(
+                    f"KnowledgeGraph built from DB: {G.number_of_nodes()} nodes, "
+                    f"{G.number_of_edges()} edges"
+                )
+            else:
+                logger.info("KnowledgeGraph: no data in DB, will build on first ingest")
+    except Exception:
+        logger.error("KnowledgeGraph init failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
     # 4. LLM (lazy)

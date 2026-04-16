@@ -1,7 +1,7 @@
 {
   "llm": {
     "enabled": true,
-    "model_path": "models\\gemma-4-2b-it-q4_k_m.gguf",
+    "model_path": "C:\\Users\\Windows10\\Desktop\\refactor-demo\\OmniLocalRAG\\models\\gemma-2-2b-it-Q4_K_M.gguf",
     "n_gpu_layers": 200,
     "n_ctx": 32768,
     "max_tokens": 4096,
